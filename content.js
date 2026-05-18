@@ -545,6 +545,8 @@
     renderedCards.clear();
     seenRJsToday.clear();
     statsBuffer = {};
+    _pendingCards.clear();
+    if (_lazyObserver) { _lazyObserver.disconnect(); _lazyObserver = null; }
     document.querySelector("#dlscore-main")?.remove();
     document.querySelectorAll("[data-dlscore-card]").forEach(el => el.remove());
     document.querySelectorAll("[data-dlscore-done]").forEach(el => { delete el.dataset.dlscoreDone; });
@@ -554,6 +556,33 @@
 
   const SKIP_HREF_PATTERN  = /(\/|[?&])(cart|trial|sample|dlzip|dlpurchase|add_cart|buy|coupon)([/?&#=]|$)/i;
   const SKIP_CLASS_PATTERN = /btn|button|cart|trial|sample|thumb|img|icon/i;
+
+  // J項: selector fallback registry
+  // DLsite のクラス名変更に備えて優先順配列で管理。先頭ほど精確なセレクター。
+  const CARD_SELECTORS = [
+    ".work_box",
+    "article",
+    ".search_result_item",
+    ".work_list_item",
+    "[class*='work_item']",
+    "li",
+  ];
+  const LIST_SELECTORS = [
+    ".recommend_list", ".same_group_list", ".work_slider",
+    "[class*='recommend']", "[class*='related']", "[class*='pickup']",
+    "[class*='ranking']",  "[class*='slider']",  "[class*='list']",
+  ];
+
+  function findCard(el) {
+    for (const sel of CARD_SELECTORS) {
+      const c = el.closest(sel);
+      if (c) return c;
+    }
+    return null;
+  }
+  function withinList(el) {
+    return LIST_SELECTORS.some(sel => el.closest(sel));
+  }
 
   function extractRJCardMap() {
     const rjCards = new Map();
@@ -565,29 +594,52 @@
       if (SKIP_HREF_PATTERN.test(a.href)) return;
       if (a.className && SKIP_CLASS_PATTERN.test(a.className)) return;
       if (a.children.length === 1 && a.children[0].tagName === "IMG") return;
-      const card =
-        a.closest(".work_box")           ||
-        a.closest("article")             ||
-        a.closest(".search_result_item") ||
-        a.closest("li");
+      const card = findCard(a);
       if (!card) return;
-      if (isDetail) {
-        const withinList =
-          card.closest(".recommend_list")      ||
-          card.closest(".same_group_list")     ||
-          card.closest(".work_slider")         ||
-          card.closest("[class*='recommend']") ||
-          card.closest("[class*='related']")   ||
-          card.closest("[class*='pickup']")    ||
-          card.closest("[class*='ranking']")   ||
-          card.closest("[class*='slider']")    ||
-          card.closest("[class*='list']");
-        if (!withinList) return;
-      }
+      if (isDetail && !withinList(card)) return;
       if (!rjCards.has(rj)) rjCards.set(rj, new Set());
       rjCards.get(rj).add(card);
     });
     return rjCards;
+  }
+
+  // D項: IntersectionObserver によるlazy fetch
+  // 画面外のカードはスコア取得を遅延し、初期ページ読み込み時のfetch爆発を防ぐ
+  let   _lazyObserver = null;
+  const _pendingCards = new Map(); // rj → Set<card>
+
+  function _ensureLazyObserver() {
+    if (_lazyObserver) return;
+    _lazyObserver = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const rj = e.target.dataset.dlscoreLazy;
+        if (!rj) continue;
+        _lazyObserver.unobserve(e.target);
+        delete e.target.dataset.dlscoreLazy;
+        const cards = _pendingCards.get(rj);
+        if (cards) { _pendingCards.delete(rj); processRJWithCards(rj, cards); }
+      }
+    }, { rootMargin: "300px 0px" });
+  }
+
+  function scheduleCard(rj, cards) {
+    if (fetchedRJs.has(rj)) {
+      const result = resultCache.get(rj);
+      if (result) cards.forEach(card => renderCard(card, result, rj, false));
+      return;
+    }
+    _ensureLazyObserver();
+    if (_pendingCards.has(rj)) {
+      const ex = _pendingCards.get(rj);
+      cards.forEach(c => ex.add(c));
+      return;
+    }
+    _pendingCards.set(rj, new Set(cards));
+    // カードの1枚目を観測ターゲットにする
+    const target = [...cards].find(c => c.isConnected);
+    if (target) { target.dataset.dlscoreLazy = rj; _lazyObserver.observe(target); }
+    else { _pendingCards.delete(rj); processRJWithCards(rj, cards); } // DOM外ならfallback
   }
 
   function processRJWithCards(rj, cards) {
@@ -656,7 +708,7 @@
     const rjCardMap = extractRJCardMap();
     for (const [rj, cards] of rjCardMap.entries()) {
       if (rj === mainRJ) continue;
-      processRJWithCards(rj, cards);
+      scheduleCard(rj, cards);  // D項: IntersectionObserver lazy fetch
     }
   }
 
@@ -693,6 +745,9 @@
         resultCache.clear();
         rawDataCache.clear();
         renderedCards.clear();
+        // D項: lazy observer をリセット
+        _pendingCards.clear();
+        if (_lazyObserver) { _lazyObserver.disconnect(); _lazyObserver = null; }
         runList();
         if (mainRJ && (isDetail || isDetailUrl(location.href))) {
           isDetail = true;

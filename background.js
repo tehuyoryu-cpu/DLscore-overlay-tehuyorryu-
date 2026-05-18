@@ -14,6 +14,9 @@ const FETCH_TIMEOUT_MS = 15_000;
 const _SCORE_TTL       = 6 * 60 * 60 * 1000;
 const _REFRESH_ALARM   = "dlscore_score_refresh";
 
+// H項: FETCH dedup map — 同一RJへの重複リクエストを1回にまとめる
+const _pendingFetches = new Map(); // rj → [sendResponse, ...]
+
 // ── bug③修正: SW 再起動時に残留「走査中」フラグをクリア ──
 // _crawlerTabId は再起動で null にリセットされるが storage の running フラグは残る
 chrome.storage.local.get({ [_PROG_KEY]: null }, (res) => {
@@ -296,28 +299,56 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // ── 価格データ取得（IndexedDB → dlwatcher.com の順でキャッシュ優先）──
+  // H項: dedup — 同じRJが同時に複数リクエストされたとき1回にまとめる
   if (msg.type === "FETCH") {
+    const rjKey = msg.rj?.toUpperCase();
+    if (!rjKey) { sendResponse({ ok: false, err: "no rj" }); return; }
+
+    if (_pendingFetches.has(rjKey)) {
+      // 既に進行中のfetchがあれば、その完了を待って同じ結果を返す
+      _pendingFetches.get(rjKey).push(sendResponse);
+      return true;
+    }
+    _pendingFetches.set(rjKey, [sendResponse]);
+
+    const _broadcast = (payload) => {
+      const callbacks = _pendingFetches.get(rjKey) || [];
+      _pendingFetches.delete(rjKey);
+      callbacks.forEach(cb => { try { cb(payload); } catch {} });
+    };
+
+    // H項: 全体タイムアウト（IndexedDB永続pending対策）
+    const _globalTimer = setTimeout(() => {
+      _broadcast({ ok: false, err: "timeout" });
+    }, FETCH_TIMEOUT_MS + 3000);
+
     (async () => {
-      // IndexedDB に新鮮なキャッシュがあればそれを返す
-      const cached = await _getScore(msg.rj);
-      if (cached && Date.now() - cached.fetchedAt < _SCORE_TTL) {
-        sendResponse({ ok: true, data: cached.data });
-        return;
-      }
-      // なければ dlwatcher.com から取得してキャッシュに保存
-      const url        = "https://dlwatcher.com/product/" + msg.rj + ".json";
-      const controller = new AbortController();
-      const timer      = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
       try {
-        const res  = await fetch(url, { signal: controller.signal });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        clearTimeout(timer);
-        await _saveScore(msg.rj, data); // IndexedDB に保存
-        sendResponse({ ok: true, data });
+        const cached = await _getScore(rjKey);
+        if (cached && Date.now() - cached.fetchedAt < _SCORE_TTL) {
+          clearTimeout(_globalTimer);
+          _broadcast({ ok: true, data: cached.data });
+          return;
+        }
+        const url        = "https://dlwatcher.com/product/" + rjKey + ".json";
+        const controller = new AbortController();
+        const timer      = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        try {
+          const res  = await fetch(url, { signal: controller.signal });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const data = await res.json();
+          clearTimeout(timer);
+          await _saveScore(rjKey, data);
+          clearTimeout(_globalTimer);
+          _broadcast({ ok: true, data });
+        } catch (err) {
+          clearTimeout(timer);
+          clearTimeout(_globalTimer);
+          _broadcast({ ok: false, err: String(err) });
+        }
       } catch (err) {
-        clearTimeout(timer);
-        sendResponse({ ok: false, err: String(err) });
+        clearTimeout(_globalTimer);
+        _broadcast({ ok: false, err: String(err) });
       }
     })();
     return true;

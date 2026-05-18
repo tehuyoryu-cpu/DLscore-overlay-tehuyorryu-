@@ -1,0 +1,286 @@
+// comp_analyzer.js — 総集編構造解析エンジン v2
+
+const _EVENT_DICT = {
+  "コミックマーケット":"comiket","コミケ":"comiket","comiket":"comiket",
+  "例大祭":"reitaisai","博麗神社例大祭":"reitaisai","れいたいさい":"reitaisai",
+  "comic1":"comic1","コミック1":"comic1","こみっく1":"comic1",
+  "m3":"m3","えむすりー":"m3","エムスリー":"m3",
+  "ボイスフェスタ":"voicefesta","ぼいすふぇすた":"voicefesta",
+  "サンクリ":"suncre","サンシャインクリエイション":"suncre",
+  "紅楼夢":"kouroumu","東方紅楼夢":"kouroumu",
+};
+
+function normalizeEvent(ev) {
+  if (!ev) return "";
+  let s = ev.replace(/[第回]\d+/g,"").replace(/\s/g,"").toLowerCase();
+  s = s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+  for (const [k, v] of Object.entries(_EVENT_DICT)) {
+    if (s.startsWith(k.toLowerCase())) return v;
+  }
+  return s;
+}
+
+const _NOISE = /総集編|まとめ|BEST|best|Complete|complete|Collection|collection|Full\s*Pack|再録|番外編|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]/g;
+const _NUM_SFX = /[\s　]*[第]?[\d０-９一二三四五六七八九十百]+[弾話冊本作品件巻]?$/;
+
+function normalizeTitle(t) {
+  return (t||"").replace(_NOISE,"").replace(_NUM_SFX,"").replace(/[\s　]+/g," ").trim();
+}
+
+function bigramSet(s) {
+  const r = new Set();
+  for (let i = 0; i < s.length-1; i++) r.add(s.slice(i,i+2));
+  return r;
+}
+function ngramSim(a, b) {
+  if (!a||!b) return 0;
+  const ga=bigramSet(a), gb=bigramSet(b);
+  if (!ga.size||!gb.size) return 0;
+  let c=0; ga.forEach(g=>{if(gb.has(g))c++;});
+  return (2*c)/(ga.size+gb.size);
+}
+function longestCommonPrefix(a, b) {
+  let i=0;
+  while(i<a.length&&i<b.length&&a[i]===b[i])i++;
+  return a.slice(0,i).trim();
+}
+
+function dateDiffDays(a, b) {
+  if (!a||!b) return null;
+  const da=new Date(a.replace(/年|月/g,"-").replace("日",""));
+  const db=new Date(b.replace(/年|月/g,"-").replace("日",""));
+  if(isNaN(da)||isNaN(db)) return null;
+  return Math.abs(da-db)/86_400_000;
+}
+
+function* _combos(arr, k) {
+  if(k===0){yield[];return;}
+  for(let i=0;i<=arr.length-k;i++)
+    for(const r of _combos(arr.slice(i+1),k-1)) yield [arr[i],...r];
+}
+
+function findPageSubset(total, workCount, candidates) {
+  const valid = candidates.filter(c=>c.pageCount>0);
+  if(!total||!valid.length) return null;
+  const tol = Math.max(5, Math.ceil(total*0.05));
+
+  if(workCount>0 && workCount<=8 && valid.length<=20) {
+    for(const combo of _combos(valid, Math.min(workCount,valid.length))) {
+      if(Math.abs(combo.reduce((s,c)=>s+c.pageCount,0)-total)<=tol) return combo;
+    }
+  }
+  const sorted=[...valid].sort((a,b)=>b.pageCount-a.pageCount);
+  const res=[]; let rem=total;
+  for(const c of sorted) {
+    if(c.pageCount<=rem+tol){res.push(c);rem-=c.pageCount;}
+    if(Math.abs(rem)<=tol) return res;
+  }
+  return null;
+}
+
+function parseCompMeta(html, selfRJ) {
+  const doc = new DOMParser().parseFromString(html,"text/html");
+  const body = doc.body?.textContent||"";
+
+  let circleId="";
+  for(const a of doc.querySelectorAll("a[href*='maker_id']")) {
+    const m=a.href.match(/maker_id[/=]([A-Z0-9]+)/i);
+    if(m){circleId=m[1];break;}
+  }
+  if(!circleId){
+    const m=html.match(/"maker_id"\s*:\s*"([A-Z0-9]+)"/i);
+    if(m) circleId=m[1];
+  }
+
+  let pageCount=0;
+  const pm = body.match(/(\d{2,4})\s*[Pp](?:age)?(?:[^a-zA-Z]|$)/)
+          || body.match(/ページ数[：:]\s*(\d+)/);
+  if(pm) pageCount=parseInt(pm[1],10);
+
+  let workCount=0;
+  const wm = body.match(/全?\s*(\d+)\s*(?:作品|本|タイトル|話)(?:を)?[収録掲載]/)
+          || body.match(/(\d+)\s*(?:作品|タイトル)(?:を)?収録/)
+          || body.match(/収録(?:作品|タイトル)数[：:]\s*(\d+)/);
+  if(wm) workCount=parseInt(wm[1],10);
+
+  const title =
+    doc.querySelector("h1.work_name,[itemprop='name']")?.textContent?.trim()
+    || doc.querySelector("title")?.textContent?.split("|")[0]?.trim()
+    || "";
+
+  let releaseDate="";
+  const dateEl=doc.querySelector("[class*='regist_date'] td,[itemprop='datePublished']");
+  if(dateEl) releaseDate=dateEl.textContent.trim();
+  if(!releaseDate){
+    const dm=body.match(/\d{4}年\d{1,2}月\d{1,2}日/);
+    if(dm) releaseDate=dm[0];
+  }
+
+  const events=[];
+  doc.querySelectorAll("td a[href*='event_id'], span.work_genre a[href*='event']").forEach(el=>{
+    const t=el.textContent.trim();
+    if(t&&t.length<40) events.push(t);
+  });
+
+  const tags=[];
+  doc.querySelectorAll("a[href*='genre_id'], .work_genre a[href*='genre']").forEach(a=>{
+    const t=a.textContent.trim();
+    if(t&&t!=="総集編") tags.push(t);
+  });
+
+  return {rj:selfRJ.toUpperCase(), circleId, title, pageCount, workCount, releaseDate, events, tags};
+}
+
+function parseCandidatesFromSearch(html, selfRJ) {
+  const doc = new DOMParser().parseFromString(html,"text/html");
+  const map = new Map();
+
+  doc.querySelectorAll("a[href*='/product_id/RJ']").forEach(a=>{
+    const m=a.href.match(/\/product_id\/(RJ\d{4,})\.html/i);
+    if(!m) return;
+    const rj=m[1].toUpperCase();
+    if(rj===selfRJ||map.has(rj)) return;
+    const title = a.getAttribute("title")?.trim()
+      || a.textContent.trim()
+      || a.querySelector("img")?.getAttribute("alt")?.trim()
+      || "";
+    if(title) map.set(rj,title);
+    else      map.set(rj,"");
+  });
+
+  return map;
+}
+
+const THRESHOLD = 60;
+
+function scoreCandidate(comp, cand) {
+  let score=0; const why=[];
+  const cn=normalizeTitle(comp.title);
+  const dn=normalizeTitle(cand.title);
+
+  // タイトル系（合算上限100点）
+  let titleScore=0;
+  const prefix=longestCommonPrefix(cn,dn);
+  if(prefix.length>=3){
+    const ratio=prefix.length/Math.max(cn.length,1);
+    if(ratio>=0.6)      {titleScore+=70;why.push(`シリーズ一致「${prefix}」`);}
+    else if(ratio>=0.3) {titleScore+=30;why.push("シリーズ部分一致");}
+  }
+  const sim=ngramSim(cn,dn);
+  if(sim>=0.8&&titleScore<60)      {titleScore+=60;why.push(`タイトル高類似(${(sim*100).toFixed(0)}%)`);}
+  else if(sim>=0.5&&titleScore<30) {titleScore+=30;why.push(`タイトル類似(${(sim*100).toFixed(0)}%)`);}
+  score += Math.min(titleScore, 100);
+
+  // イベント一致
+  const ce=comp.events.map(normalizeEvent).filter(Boolean);
+  const de=normalizeEvent(cand.event||"");
+  if(de&&ce.length){
+    if(ce.includes(de))                                {score+=50;why.push(`イベント一致(${cand.event})`);}
+    else if(ce.some(e=>e.includes(de)||de.includes(e))){score+=25;why.push(`イベント部分一致(${cand.event})`);}
+  }
+
+  // 発売日スコアリング（段階的）
+  const days=dateDiffDays(comp.releaseDate, cand.releaseDate);
+  if(days !== null){
+    if      (days <= 180)  {score+=40;why.push("6ヶ月以内");}
+    else if (days <= 365)  {score+=30;why.push("1年以内");}
+    else if (days <= 730)  {score+=20;why.push("2年以内");}
+    else if (days <= 1460) {score+=10;why.push("4年以内");}
+    else                   {score-=10;why.push("4年超");}
+  }
+
+  // タグ一致
+  const compTagSet=new Set(comp.tags);
+  const hits=(cand.tags||[]).filter(t=>compTagSet.has(t)).length;
+  if(hits>0){score+=hits*5;why.push(`タグ${hits}件一致`);}
+
+  // ページ数（個別評価）
+  if(comp.pageCount&&cand.pageCount){
+    const r=cand.pageCount/comp.pageCount;
+    if(r<0.9&&r>0.05) score+=10;
+  }
+
+  return {rj:cand.rj, score, reasons:why, pageCount:cand.pageCount||0};
+}
+
+async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldContinue=()=>true) {
+  const INFO_URL   = rj=>`https://www.dlsite.com/home/product/info/=/product_id/${rj}.json`;
+  const CIRCLE_URL = (id,p)=>`https://www.dlsite.com/maniax/fsr/=/maker_id/${id}/per_page/100/page/${p}/show_type/1`;
+  const MAX_API    = 30;
+  const CONCUR     = 5;
+
+  const comp=parseCompMeta(html,compRJ);
+  if(!comp.circleId) return [];
+
+  // Phase 1: 検索結果HTMLからタイトル付き候補リストを作成
+  const titleMap=new Map();
+  for(let page=1;page<=5;page++){
+    if(!shouldContinue()) return [];
+    let pageHtml;
+    try{pageHtml=await getText(CIRCLE_URL(comp.circleId,page));}
+    catch{break;}
+    parseCandidatesFromSearch(pageHtml,compRJ).forEach((title,rj)=>titleMap.set(rj,title));
+    if(titleMap.size-(page-1)*100<90) break;
+    await sleep(200);
+  }
+  if(!titleMap.size) return [];
+
+  // Phase 1.5: タイトル類似度で事前フィルタ
+  const cn=normalizeTitle(comp.title);
+  const ranked=[...titleMap.entries()]
+    .map(([rj,title])=>({rj,title,prescore:ngramSim(cn,normalizeTitle(title))}))
+    .sort((a,b)=>b.prescore-a.prescore)
+    .slice(0,MAX_API);
+
+  // Phase 2: 上位候補の詳細情報を取得してフルスコアリング
+  const scored=[];
+  let idx=0;
+
+  async function worker(){
+    while(shouldContinue()){
+      const i=idx++;
+      if(i>=ranked.length) break;
+      const {rj}=ranked[i];
+      let info;
+      try{info=await getJSON(INFO_URL(rj));}
+      catch{continue;}
+      if(!info) continue;
+
+      const genres=info.genres||[];
+      const isComp=genres.some(g=>(g.id||g.genre_id)===515||g.name==="総集編");
+      if(isComp) continue;
+
+      const cand={
+        rj,
+        title:       info.work_name||"",
+        pageCount:   info.page_count||0,
+        releaseDate: (info.regist_date||"").slice(0,10),
+        event:       info.event||"",
+        tags:        genres.map(g=>g.name||"").filter(Boolean),
+        price:       info.price||0,
+      };
+      const res=scoreCandidate(comp,cand);
+      if(res.score>=THRESHOLD) scored.push(res);
+      await sleep(120);
+    }
+  }
+
+  await Promise.all(Array.from({length:CONCUR},worker));
+  scored.sort((a,b)=>b.score-a.score);
+
+  if(comp.pageCount>0&&scored.length>0){
+    const subset=findPageSubset(comp.pageCount,comp.workCount,scored);
+    if(subset){
+      subset.forEach(s=>{
+        const t=scored.find(r=>r.rj===s.rj);
+        if(t){t.score+=80;t.reasons.push("ページ数組合せ一致");}
+      });
+      scored.sort((a,b)=>b.score-a.score);
+    }
+  }
+
+  const limit=comp.workCount>0?comp.workCount*2:20;
+  const result=scored.slice(0,limit).map(r=>r.rj);
+  console.debug(`[CompAnalyzer] ${compRJ}: ${result.length}件推定`,scored.slice(0,5).map(r=>`${r.rj}(${r.score})`));
+  return result;
+}

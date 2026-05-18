@@ -1,0 +1,103 @@
+不具合や改善案を記入し、解決したものは端的に記入してください。この文章は削除、加工しないでください
+
+【未解決・既知バグ】
+
+■ UI / 表示関係
+- Firefox、画像をホバーして拡大させた際の反射補正（DLsiteのプレビュー要素クラス名が不明なため動作未確認）
+- 国ブロックを消したい（DLsiteのDOMを直接操作する必要あり、要検討）
+
+■ ブラウザ互換性
+'background.scripts' requires manifest version of 2 or lower.(chrome)
+
+■ 機能要望
+- アップデートなどを配信する通知ボックスを作りたい。
+
+【解決済み】
+
+■ UI / 表示関係
+- Firefox、閾値の数値を変更するボタンが白くて浮く → -moz-appearance:textfield で統一
+- renderMain の \n が改行されない → alertSpan を別要素で管理
+- renderMain の border に初期色未指定 → border:2px solid #ccc で仮色を設定
+- applySettingsToRendered が最安値バッジを消す → data-dlscore-alert 属性で状態を保持
+- applySettingsToRendered が⚠️警告を📉アラートで上書き → prevAlert.includes("📉") で独立して保持
+- スコアの数値を文字に変換できるようにしたい → useTextScore設定を追加（良/可/不）
+- 発売後10日間限定セール商品に衝動買い注意を促して → 年間セール日数90日以上に⚠️警告、showSaleWarning でオンオフ可能
+- popup の統計表示で totalScore が NaN / 破損データのとき「平均 NaN」と表示される → loadStats で Number.isFinite(todaySt.totalScore) チェックを追加
+
+■ コード不備・ロジックバグ
+- RJのスコアは同じRJにつき一回まで → data-dlscore-done フラグで制御済み
+- mainRJ が runList と詳細fetchRJ で二重fetch → runList から mainRJ をスキップ、fetchMainRJ を専用関数に分離
+- onUrlChange の setTimeout が複数積まれる → clearTimeout によるデバウンスで1つに制限
+- history.pushState の二重ラップ → __dlscoreHooked フラグで防止
+- scoreText のラベルにスペースのみが通る → .trim() で防止
+- checkPriceAlert がセール中でない作品も記録 → isOnSale チェックを追加
+- カードのない RJ に fetch が走る → cards.size === 0 のとき fetch をスキップ
+- extractRJCardMap の RJ 正規表現に /i フラグなし → 追加済み（小文字rj対応）
+- SKIP_HREF_PATTERN が ?add_cart= 形式を見逃す → クエリパラメータも対象に修正
+- H-6. seenRJsToday がページリロードでリセットされ → SEEN_RJS_KEY でlocalStorage永続化 + 500msデバウンス追加
+- H-7. popup の loadStats が storage.onChanged を監視しないため → chrome.storage.onChanged.addListener で自動更新済み
+- H-8. SPA遷移中にMutationObserverと競合 → spaRunning フラグで抑制
+- M-5. onUrlChange の setTimeout(700) → DOM安定化チェック（最大1500ms）に変更
+- recordStat のタブ間レース → 3秒バッファ + まとめ書きで競合を最小化
+- flushStats がストレージ書き込み失敗後にリトライしない → 失敗時に statsFlushTimer が null のときのみ5秒後にリトライをスケジュール、flushStats 先頭で statsFlushTimer をリセット
+- checkPriceAlert が同価格でも localStorage に書き込む → current < prev のときのみ更新するよう修正（不要な書き込みを排除）
+- storage.onChanged の STATS_KEY 早期 return に keys.length === 0 ガード漏れ → 条件を整理して明確化
+- fetchMainRJ の SPA 遷移中に mainRJ（let変数）が書き換わり古い RJ のデータが新 URL に混入 → 呼び出し時点で const localRJ = mainRJ にキャプチャして全コールバック内で使用
+- onUrlChange の domStableTimer がローカル変数のため高速 SPA 連続遷移で前回の check ループをキャンセルできず二重初期化が発生 → domStableTimer をモジュールスコープに移動し clearTimeout で確実にキャンセル
+- CLEAR_CACHE メッセージが priceHist を消去しない → localStorage の PRICE_HIST_KEY 削除と in-memory の priceHist = {} 初期化を追加
+- storage.onChanged で設定キーが削除された場合（newValue が undefined）settings[key] が undefined になりデフォルト値に戻らない → newValue !== undefined ? newValue : DEFAULTS[key] でフォールバック
+- clampPreviewPosition の double rAF 完了前に要素が DOM から削除されると getBoundingClientRect でエラー → rAF 内で el.isConnected チェックを追加して中止
+- priceHist の localStorage.setItem が QuotaExceededError 時に catch なしで黙って失敗しデータ未保存 → cache と同様に半分削減して再試行するフォールバックを追加
+
+■ パフォーマンス
+- priceHist が無制限肥大化 → 1000件上限・タイムスタンプ付き削除
+- rawDataCache / resultCache が無制限肥大化 → RESULT_MAX=500 で上限管理
+- saveCache が毎fetch実行 → PRUNE_INTERVAL=5分のデバウンス
+- localStorage.setItem が毎fetch2回 → 100msデバウンスで1回にまとめ
+- findCardsByRJ を RJ ごとにDOM全検索 → extractRJCardMap で1回のDOM walkに統合
+- MutationObserver が2つ独立 → 1つに統合（runList + hover補正）
+- MutationObserver が全DOM変化でrunListを起動 → RJリンク追加時のみ起動 + requestIdleCallback で軽量化
+
+■ ブラウザ互換性
+- SPA ナビゲーション非対応 → pushState/replaceState/popstateをフックして自動再初期化（デバウンス付き）
+- Firefox、ポップアップが更新されていない → manifest version 更新でキャッシュ強制リセット
+- background.service_worker is currently disabled (Firefox) → scripts フォールバックを追加、strict_min_version を 102.0 に引き下げ
+- 'background.scripts' requires manifest version of 2 or lower (Chrome) → Chrome は service_worker を使うため scripts は無視される（警告のみで動作は正常）
+- popupが再び現れなくなった（Firefox）→ readyState チェック付き initPopup() に変更、tabs権限追加、null要素チェック追加
+- Kiwi/Android 各種対応 → IS_TOUCH判定、visual viewport、タップtooltip、タップターゲット拡大、inputmode追加、overflow-y:auto
+- chrome 拡張機能の幅が制限されているのか、すべて表示されない → popup.html の body に scrollbar-gutter:stable を追加、スクロールバーが310px幅を侵食しないよう修正
+- ポップアップ内のタブが開く、閉じることができない（ファイヤーフォックス） → Firefox MV3 の CSP がインラインスクリプトをブロックするため、popup.html のインライン &lt;script&gt; を削除し initAccordion() として popup.js へ移動
+
+■ 機能追加（解決済み）
+- スコアのほかに、ポップアップ経由で指定の文字を追加できるようにして → ラベル設定セクションを追加
+- manifest の version が popup 表示の v1.7 と不一致（1.6） → manifest.json を 1.7 に修正
+- manifest v1.8 に更新、host_permissions に text.pollinations.ai を追加（AI レビュー機能・無料）
+- ポップアップにスコア統計 → 今日の閲覧件数・平均スコアをポップアップに表示
+- 最安値更新アラート → セール中のみ記録し、安くなった作品に📉を表示
+- Firefox/Chrome、RJの詳細ページでおすすめやサークルの作品一覧のRJのスコアが表示されない → 詳細ページでもrunList()を実行するよう変更
+- maniax/work/=/product_id/RJ~~~.htmlのみにスコアを表示 → SKIP_HREF/CLASS_PATTERNで除外（クエリパラメータ対応）、推薦リスト内のみカード表示
+- maniax/work/=/product_id/RJ~~~.htmlにスコアが表示されない → isDetailUrl()複数パターン対応、DOM未構築時リトライ
+- 総集編マーク機能 → dldshare.net の総集編タグページを全ページ巡回し RJ 番号を自動収集、chrome.storage.local に保存、カードと詳細オーバーレイに「📦 総集編あり」「📦 この作品は総集編が存在します」バッジを表示。ポップアップの「📦 総集編マーク一覧」セクションでリスト確認・個別削除・再取得が可能
+- 詳細ページで Alt+G を押すと購買意欲を掻き立てる AI 紹介文を生成してほしい → popup に AIレビューセクション（有効化トグル・Groq APIキー入力・文体選択4種）を追加、Groq API（llama-3.1-8b-instant、無料枠あり）で生成、画面下部モーダルに表示
+
+
+■ RJ Crawler Pro（別拡張）
+- manifest に "type":"module" がなく ES module service worker が起動しない → 追加済み
+- db.js の onupgradeneeded 内 let db がモジュール変数を shadow → req.result を直接使うよう修正、CRUD関数を追加
+- db.js / filter.js がどこにも import されていない（死コード）→ crawler.js・background.js に組み込み
+- storage.js が chrome.storage.local を使用（5MB上限）→ IndexedDB(db.js)に委譲するラッパーに変更
+- crawler.js throttle の競合：複数worker が同時に lastRequest を読んで制限をすり抜ける → Promiseチェーン直列化で修正
+- fetchHTML が res.ok を確認しない → チェック追加、エラーを saveError で記録
+- fetch timeout なし → AbortSignal.timeout で12秒上限を設定
+- ページネーションの stop 条件が pageLinks.length===0 のみ → DOM で a[rel='next'] 検出に変更
+- isRunning() を pagination fetch 前にチェックしない → 各 fetch 前に確認するよう修正
+- parser.js が RJ 番号を返り値に含めない → rj・rjAll フィールドを追加
+- background.js が二重 start を防がない → running フラグと sendResponse で拒否
+- background.js の startCrawler エラーが unhandled → .catch() + .finally() で処理
+- popup に進捗表示なし → storage.onChanged でリアルタイム更新、フェーズ・進捗・件数を表示
+- CONCURRENCY 10 → 5 に削減（サーバー負荷軽減）、MIN_INTERVAL 120ms → 300ms に変更
+
+【アイデア・改善案】
+- スコア履歴の記録（過去にどのRJを見たか、スコアの変動をグラフ表示）
+- ウィッシュリスト機能（気になる作品をメモしておける）
+- ソート/フィルター機能（スコアXX以下の作品を薄く表示） → dimBelow設定で実装済み

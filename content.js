@@ -139,8 +139,6 @@
   // ── ジャンル履歴記録（詳細ページのみ）──
   function recordGenreHistory(rj, score) {
     if (!isDetail) return;
-
-    // 複数セレクターでフォールバックしながらジャンルを収集
     const seen = new Set();
     const genres = [];
     document.querySelectorAll(
@@ -149,14 +147,11 @@
       const t = a.textContent.trim();
       if (t && t.length < 30 && !seen.has(t)) { seen.add(t); genres.push(t); }
     });
-
     const title  = document.querySelector("h1.work_name, [itemprop='name'], .work_name h1")
                      ?.textContent?.trim() || "";
     const circle = document.querySelector(".maker_name a, a[href*='maker_id']")
                      ?.textContent?.trim() || "";
-
     if (!genres.length && !title) return;
-
     chrome.storage.local.get({ [GENRE_HIST_KEY]: {} }, res => {
       if (chrome.runtime.lastError) return;
       const hist = res[GENRE_HIST_KEY];
@@ -206,6 +201,7 @@
     }, 500);
   }
 
+  // 詳細ページ（オーバーレイ表示）のみカウント
   function recordStat(rj, score) {
     const today = jstDateStr();
     if (today !== statsDate) {
@@ -610,7 +606,7 @@
         const result      = calcScore(data, { ...settings });
         const isNewLowest = checkPriceAlert(rj, data);
         limitMapSize(resultCache); resultCache.set(rj, result);
-        recordStat(rj, result.score);
+        // recordStat はここでは呼ばない（詳細ページ＝オーバーレイ表示のみカウント）
         cards.forEach(card => {
           if (card.isConnected) renderCard(card, result, rj, isNewLowest);
         });
@@ -634,8 +630,8 @@
         const result = calcScore(data, { ...settings });
         limitMapSize(resultCache); resultCache.set(localRJ, result);
         renderMain(result, checkPriceAlert(localRJ, data), data);
-        recordStat(localRJ, result.score);
-        recordGenreHistory(localRJ, result.score); // ジャンル履歴を記録
+        recordStat(localRJ, result.score);        // 詳細ページのみカウント
+        recordGenreHistory(localRJ, result.score); // ジャンル履歴記録
         const map       = extractRJCardMap();
         const mainCards = map.get(localRJ);
         if (mainCards?.size > 0) {

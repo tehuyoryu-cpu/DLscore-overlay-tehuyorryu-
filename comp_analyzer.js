@@ -1,4 +1,4 @@
-// comp_analyzer.js — 総集編構造解析エンジン v2
+// comp_analyzer.js — 総集編構造解析エンジン v3
 
 const _EVENT_DICT = {
   "コミックマーケット":"comiket","コミケ":"comiket","comiket":"comiket",
@@ -20,7 +20,7 @@ function normalizeEvent(ev) {
   return s;
 }
 
-const _NOISE = /総集編|まとめ|BEST|best|Complete|complete|Collection|collection|Full\s*Pack|再録|番外編|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]/g;
+const _NOISE   = /総集編|まとめ|BEST|best|Complete|complete|Collection|collection|Full\s*Pack|再録|番外編|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅰⅱⅲⅳⅴⅵⅶⅷⅸⅹ]/g;
 const _NUM_SFX = /[\s　]*[第]?[\d０-９一二三四五六七八九十百]+[弾話冊本作品件巻]?$/;
 
 function normalizeTitle(t) {
@@ -45,12 +45,22 @@ function longestCommonPrefix(a, b) {
   return a.slice(0,i).trim();
 }
 
+// 絶対日数差（null=不明）
 function dateDiffDays(a, b) {
   if (!a||!b) return null;
   const da=new Date(a.replace(/年|月/g,"-").replace("日",""));
   const db=new Date(b.replace(/年|月/g,"-").replace("日",""));
   if(isNaN(da)||isNaN(db)) return null;
   return Math.abs(da-db)/86_400_000;
+}
+
+// 候補が総集編より後発かどうか判定
+function isCandAfterComp(compDate, candDate) {
+  if (!compDate || !candDate) return false;
+  const dc = new Date(compDate.replace(/年|月/g,"-").replace("日",""));
+  const dd = new Date(candDate.replace(/年|月/g,"-").replace("日",""));
+  if (isNaN(dc) || isNaN(dd)) return false;
+  return dd > dc;
 }
 
 function* _combos(arr, k) {
@@ -63,7 +73,6 @@ function findPageSubset(total, workCount, candidates) {
   const valid = candidates.filter(c=>c.pageCount>0);
   if(!total||!valid.length) return null;
   const tol = Math.max(5, Math.ceil(total*0.05));
-
   if(workCount>0 && workCount<=8 && valid.length<=20) {
     for(const combo of _combos(valid, Math.min(workCount,valid.length))) {
       if(Math.abs(combo.reduce((s,c)=>s+c.pageCount,0)-total)<=tol) return combo;
@@ -79,7 +88,7 @@ function findPageSubset(total, workCount, candidates) {
 }
 
 function parseCompMeta(html, selfRJ) {
-  const doc = new DOMParser().parseFromString(html,"text/html");
+  const doc  = new DOMParser().parseFromString(html,"text/html");
   const body = doc.body?.textContent||"";
 
   let circleId="";
@@ -116,6 +125,11 @@ function parseCompMeta(html, selfRJ) {
     if(dm) releaseDate=dm[0];
   }
 
+  // 価格
+  let price=0;
+  const pm2=body.match(/(\d{1,3}(?:,\d{3})*)\s*円/);
+  if(pm2) price=parseInt(pm2[1].replace(/,/g,""),10)||0;
+
   const events=[];
   doc.querySelectorAll("td a[href*='event_id'], span.work_genre a[href*='event']").forEach(el=>{
     const t=el.textContent.trim();
@@ -128,13 +142,12 @@ function parseCompMeta(html, selfRJ) {
     if(t&&t!=="総集編") tags.push(t);
   });
 
-  return {rj:selfRJ.toUpperCase(), circleId, title, pageCount, workCount, releaseDate, events, tags};
+  return {rj:selfRJ.toUpperCase(), circleId, title, pageCount, workCount, releaseDate, events, tags, price};
 }
 
 function parseCandidatesFromSearch(html, selfRJ) {
   const doc = new DOMParser().parseFromString(html,"text/html");
   const map = new Map();
-
   doc.querySelectorAll("a[href*='/product_id/RJ']").forEach(a=>{
     const m=a.href.match(/\/product_id\/(RJ\d{4,})\.html/i);
     if(!m) return;
@@ -144,10 +157,8 @@ function parseCandidatesFromSearch(html, selfRJ) {
       || a.textContent.trim()
       || a.querySelector("img")?.getAttribute("alt")?.trim()
       || "";
-    if(title) map.set(rj,title);
-    else      map.set(rj,"");
+    map.set(rj, title||"");
   });
-
   return map;
 }
 
@@ -158,7 +169,7 @@ function scoreCandidate(comp, cand) {
   const cn=normalizeTitle(comp.title);
   const dn=normalizeTitle(cand.title);
 
-  // タイトル系（合算上限100点）
+  // ── タイトル系（合算上限100点）──
   let titleScore=0;
   const prefix=longestCommonPrefix(cn,dn);
   if(prefix.length>=3){
@@ -171,7 +182,7 @@ function scoreCandidate(comp, cand) {
   else if(sim>=0.5&&titleScore<30) {titleScore+=30;why.push(`タイトル類似(${(sim*100).toFixed(0)}%)`);}
   score += Math.min(titleScore, 100);
 
-  // イベント一致
+  // ── イベント一致 ──
   const ce=comp.events.map(normalizeEvent).filter(Boolean);
   const de=normalizeEvent(cand.event||"");
   if(de&&ce.length){
@@ -179,25 +190,41 @@ function scoreCandidate(comp, cand) {
     else if(ce.some(e=>e.includes(de)||de.includes(e))){score+=25;why.push(`イベント部分一致(${cand.event})`);}
   }
 
-  // 発売日スコアリング（段階的）
-  const days=dateDiffDays(comp.releaseDate, cand.releaseDate);
-  if(days !== null){
-    if      (days <= 180)  {score+=40;why.push("6ヶ月以内");}
-    else if (days <= 365)  {score+=30;why.push("1年以内");}
-    else if (days <= 730)  {score+=20;why.push("2年以内");}
-    else if (days <= 1460) {score+=10;why.push("4年以内");}
-    else                   {score-=10;why.push("4年超");}
+  // ── 発売日スコアリング ──
+  // 後発（候補が総集編より新しい）→ 収録不可
+  if(isCandAfterComp(comp.releaseDate, cand.releaseDate)){
+    score -= 80;
+    why.push("総集編より後発（収録不可）");
+  } else {
+    const days=dateDiffDays(comp.releaseDate, cand.releaseDate);
+    if(days !== null){
+      if      (days <= 180)  {score+=40;why.push("6ヶ月以内");}
+      else if (days <= 365)  {score+=30;why.push("1年以内");}
+      else if (days <= 730)  {score+=20;why.push("2年以内");}
+      else if (days <= 1460) {score+=10;why.push("4年以内");}
+      else                   {score-=10;why.push("4年超");}
+    }
   }
 
-  // タグ一致
+  // ── タグ一致 ──
   const compTagSet=new Set(comp.tags);
   const hits=(cand.tags||[]).filter(t=>compTagSet.has(t)).length;
   if(hits>0){score+=hits*5;why.push(`タグ${hits}件一致`);}
 
-  // ページ数（個別評価）
+  // ── ページ数 ──
   if(comp.pageCount&&cand.pageCount){
     const r=cand.pageCount/comp.pageCount;
-    if(r<0.9&&r>0.05) score+=10;
+    if(r>0.85){
+      // 候補1件で総集編の85%超を占めるのは非現実的
+      score-=30;why.push("ページ数過大（単独85%超）");
+    } else if(r<0.9&&r>0.05){
+      score+=10;
+    }
+  }
+
+  // ── 価格：候補が総集編の1.5倍超なら収録されにくい ──
+  if(comp.price>0&&cand.price>0&&cand.price>comp.price*1.5){
+    score-=15;why.push("価格過大");
   }
 
   return {rj:cand.rj, score, reasons:why, pageCount:cand.pageCount||0};
@@ -232,7 +259,7 @@ async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldCon
     .sort((a,b)=>b.prescore-a.prescore)
     .slice(0,MAX_API);
 
-  // Phase 2: 上位候補の詳細情報を取得してフルスコアリング
+  // Phase 2: フルスコアリング
   const scored=[];
   let idx=0;
 

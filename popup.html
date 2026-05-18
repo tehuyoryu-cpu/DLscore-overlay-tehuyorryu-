@@ -9,28 +9,16 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
 :root{
-  --bg:       #080810;
-  --s1:       #0f0f1a;
-  --s2:       #141422;
-  --s3:       #1a1a2e;
-  --bd:       #1e1e32;
-  --bd2:      #262640;
-  --ac:       #7c6dfa;
-  --ac2:      #b8adff;
-  --ac-glow:  rgba(124,109,250,.18);
-  --ac-faint: rgba(124,109,250,.07);
-  --green:    #22d472;
-  --g-glow:   rgba(34,212,114,.15);
-  --yellow:   #f5a623;
-  --y-glow:   rgba(245,166,35,.15);
-  --red:      #f04060;
-  --r-glow:   rgba(240,64,96,.12);
-  --txt:      #c8c8e8;
-  --txt2:     #8888aa;
-  --txt3:     #50507a;
-  --mono:     'DM Mono','Consolas','Liberation Mono',monospace;
-  --head:     'Syne',system-ui,sans-serif;
-  --sans:     system-ui,-apple-system,'Segoe UI',sans-serif;
+  --bg:#080810;--s1:#0f0f1a;--s2:#141422;--s3:#1a1a2e;
+  --bd:#1e1e32;--bd2:#262640;
+  --ac:#7c6dfa;--ac2:#b8adff;--ac-glow:rgba(124,109,250,.18);--ac-faint:rgba(124,109,250,.07);
+  --green:#22d472;--g-glow:rgba(34,212,114,.15);
+  --yellow:#f5a623;--y-glow:rgba(245,166,35,.15);
+  --red:#f04060;--r-glow:rgba(240,64,96,.12);
+  --txt:#c8c8e8;--txt2:#8888aa;--txt3:#50507a;
+  --mono:'DM Mono','Consolas','Liberation Mono',monospace;
+  --head:'Syne',system-ui,sans-serif;
+  --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
   --r4:4px;--r6:6px;--r8:8px;--r12:12px;
 }
 
@@ -39,68 +27,37 @@
 ::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:2px}
 
 body{
-  background:var(--bg);
-  color:var(--txt);
-  font-family:var(--sans);
-  font-size:12px;
+  background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:12px;
   width:320px;min-width:320px;max-width:320px;
-  overflow-x:hidden;overflow-y:auto;
-  max-height:600px;
-  scrollbar-gutter:stable;
+  overflow-x:hidden;overflow-y:auto;max-height:600px;scrollbar-gutter:stable;
 }
 
-/* ══════════════════════════════
-   HEADER
-══════════════════════════════ */
 .hd{
   padding:14px 16px 12px;
   background:linear-gradient(160deg,#13132a 0%,#0b0b16 60%,#080810 100%);
-  border-bottom:1px solid var(--bd);
-  position:sticky;top:0;z-index:20;
-  display:flex;align-items:center;gap:12px;
-  overflow:hidden;
+  border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:20;
+  display:flex;align-items:center;gap:12px;overflow:hidden;
 }
 .hd::before{
-  content:'';position:absolute;
-  top:-40px;right:-20px;
-  width:120px;height:120px;
-  background:radial-gradient(circle,rgba(124,109,250,.12) 0%,transparent 70%);
-  pointer-events:none;
+  content:'';position:absolute;top:-40px;right:-20px;width:120px;height:120px;
+  background:radial-gradient(circle,rgba(124,109,250,.12) 0%,transparent 70%);pointer-events:none;
 }
-.hd-logo{
-  position:relative;
-  width:34px;height:34px;flex-shrink:0;
-}
+.hd-logo{position:relative;width:34px;height:34px;flex-shrink:0}
 .hd-logo-ring{
-  position:absolute;inset:0;
-  border-radius:10px;
+  position:absolute;inset:0;border-radius:10px;
   background:linear-gradient(135deg,#9c8dff,#5c4dda);
   box-shadow:0 0 16px rgba(124,109,250,.45),0 2px 8px rgba(0,0,0,.4);
-  display:flex;align-items:center;justify-content:center;
-  font-size:16px;
+  display:flex;align-items:center;justify-content:center;font-size:16px;
 }
 .hd-text{flex:1;min-width:0}
-.hd-title{
-  font-family:var(--head);
-  font-size:14px;font-weight:800;
-  color:#fff;letter-spacing:.02em;
-  line-height:1.1;
-}
-.hd-sub{
-  font-family:var(--mono);
-  font-size:9px;color:var(--txt3);
-  letter-spacing:.12em;margin-top:2px;
-}
+.hd-title{font-family:var(--head);font-size:14px;font-weight:800;color:#fff;letter-spacing:.02em;line-height:1.1}
+.hd-sub{font-family:var(--mono);font-size:9px;color:var(--txt3);letter-spacing:.12em;margin-top:2px}
 .hd-pill{
   font-family:var(--mono);font-size:9px;font-weight:500;
   background:var(--ac-faint);border:1px solid rgba(124,109,250,.25);
-  color:var(--ac2);padding:2px 8px;border-radius:20px;
-  letter-spacing:.08em;white-space:nowrap;
+  color:var(--ac2);padding:2px 8px;border-radius:20px;letter-spacing:.08em;white-space:nowrap;
 }
 
-/* ══════════════════════════════
-   STATS HERO
-══════════════════════════════ */
 .stats-hero{
   padding:14px 16px;
   background:linear-gradient(135deg,var(--s1) 0%,var(--bg) 100%);
@@ -108,346 +65,166 @@ body{
   display:grid;grid-template-columns:1fr 1fr;gap:10px;
 }
 .stat-card{
-  background:var(--s2);
-  border:1px solid var(--bd);
-  border-radius:var(--r8);
-  padding:10px 12px 9px;
-  position:relative;overflow:hidden;
-  transition:border-color .2s;
+  background:var(--s2);border:1px solid var(--bd);border-radius:var(--r8);
+  padding:10px 12px 9px;position:relative;overflow:hidden;transition:border-color .2s;
 }
 .stat-card:hover{border-color:var(--bd2)}
 .stat-card::before{
-  content:'';position:absolute;
-  top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,var(--ac),transparent);
-  opacity:0;transition:opacity .2s;
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--ac),transparent);opacity:0;transition:opacity .2s;
 }
 .stat-card:hover::before{opacity:.5}
-.stat-lbl{
-  font-size:9px;font-family:var(--mono);
-  letter-spacing:.1em;color:var(--txt3);
-  text-transform:uppercase;margin-bottom:5px;
-}
-.stat-num{
-  font-family:var(--head);
-  font-size:26px;font-weight:800;
-  color:#fff;line-height:1;
-}
-.stat-unit{
-  font-family:var(--mono);font-size:10px;
-  color:var(--txt2);margin-top:2px;
-}
+.stat-lbl{font-size:9px;font-family:var(--mono);letter-spacing:.1em;color:var(--txt3);text-transform:uppercase;margin-bottom:5px}
+.stat-num{font-family:var(--head);font-size:26px;font-weight:800;color:#fff;line-height:1}
+.stat-unit{font-family:var(--mono);font-size:10px;color:var(--txt2);margin-top:2px}
 .stat-card.accent .stat-num{
   background:linear-gradient(135deg,var(--ac2),var(--ac));
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  background-clip:text;
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
 }
 
-/* ══════════════════════════════
-   SECTION
-   H項: contain:layout paint でFirefox repaint 軽減
-══════════════════════════════ */
-.section{
-  border-bottom:1px solid var(--bd);
-  contain:layout paint;
-}
-
+.section{border-bottom:1px solid var(--bd);contain:layout paint}
 .section-hd{
-  display:flex;align-items:center;gap:8px;
-  padding:8px 16px;cursor:pointer;user-select:none;
-  background:var(--s1);
-  transition:background .15s;
+  display:flex;align-items:center;gap:8px;padding:8px 16px;
+  cursor:pointer;user-select:none;background:var(--s1);transition:background .15s;
 }
 .section-hd:hover{background:var(--s2)}
-
 .shd-icon{
-  width:20px;height:20px;border-radius:5px;
-  background:var(--s3);border:1px solid var(--bd2);
-  display:flex;align-items:center;justify-content:center;
-  font-size:10px;flex-shrink:0;
-  transition:all .15s;
+  width:20px;height:20px;border-radius:5px;background:var(--s3);border:1px solid var(--bd2);
+  display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;transition:all .15s;
 }
 .section-hd:hover .shd-icon{border-color:var(--ac);background:var(--ac-faint)}
-
-.shd-label{
-  font-size:10px;font-weight:700;
-  letter-spacing:.1em;text-transform:uppercase;
-  color:var(--txt2);flex:1;
-  font-family:var(--head);
-}
+.shd-label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--txt2);flex:1;font-family:var(--head)}
 .section-hd:hover .shd-label{color:var(--txt)}
-
-.shd-badge{
-  font-family:var(--mono);font-size:9px;
-  background:var(--s3);border:1px solid var(--bd2);
-  color:var(--txt3);padding:1px 6px;border-radius:20px;
-}
-
-.arrow{
-  font-size:8px;color:var(--txt3);
-  transition:transform .22s cubic-bezier(.34,1.2,.64,1);
-}
+.arrow{font-size:8px;color:var(--txt3);transition:transform .22s cubic-bezier(.34,1.2,.64,1)}
 .section-hd.open .arrow{transform:rotate(180deg)}
-
 .section-body{display:none}
 .section-body.open{display:block}
 
-/* ══════════════════════════════
-   TABLE ROWS
-══════════════════════════════ */
-.row{
-  display:flex;align-items:center;
-  padding:8px 16px;gap:8px;
-  border-top:1px solid var(--bd);
-  transition:background .12s;
-}
+.row{display:flex;align-items:center;padding:8px 16px;gap:8px;border-top:1px solid var(--bd);transition:background .12s}
 .row:first-child{border-top:none}
 .row:hover{background:rgba(255,255,255,.018)}
-
 .row-icon{font-size:12px;flex-shrink:0;width:16px;text-align:center}
 .row-label{flex:1;font-size:12px;color:var(--txt)}
 .row-sub{font-size:10px;color:var(--txt3);margin-top:1px}
 .row-ctrl{flex-shrink:0}
 
-/* ══════════════════════════════
-   TOGGLE
-══════════════════════════════ */
 .toggle{position:relative;width:38px;height:20px;display:inline-block;flex-shrink:0}
 .toggle input{display:none}
 .toggle-track{
-  position:absolute;inset:0;
-  background:var(--bd2);border-radius:10px;
-  cursor:pointer;transition:background .2s;
-  border:1px solid var(--bd);
+  position:absolute;inset:0;background:var(--bd2);border-radius:10px;
+  cursor:pointer;transition:background .2s;border:1px solid var(--bd);
 }
 .toggle-thumb{
-  position:absolute;top:3px;left:3px;
-  width:12px;height:12px;
+  position:absolute;top:3px;left:3px;width:12px;height:12px;
   background:var(--txt3);border-radius:50%;
-  transition:transform .2s cubic-bezier(.34,1.3,.64,1),background .2s;
-  pointer-events:none;
+  transition:transform .2s cubic-bezier(.34,1.3,.64,1),background .2s;pointer-events:none;
 }
-.toggle input:checked~.toggle-track{
-  background:linear-gradient(135deg,#9c8dff,#5c4dda);
-  border-color:rgba(124,109,250,.4);
-  box-shadow:0 0 8px rgba(124,109,250,.3);
-}
-.toggle input:checked~.toggle-track .toggle-thumb{
-  transform:translateX(18px);background:#fff;
-}
+.toggle input:checked~.toggle-track{background:linear-gradient(135deg,#9c8dff,#5c4dda);border-color:rgba(124,109,250,.4);box-shadow:0 0 8px rgba(124,109,250,.3)}
+.toggle input:checked~.toggle-track .toggle-thumb{transform:translateX(18px);background:#fff}
 
-/* ══════════════════════════════
-   INPUTS
-══════════════════════════════ */
 .num-in{
-  width:52px;
-  background:var(--s2);border:1px solid var(--bd2);
-  border-radius:var(--r6);color:var(--txt);
-  font-family:var(--mono);font-size:12px;
-  padding:4px 7px;text-align:right;outline:none;
-  transition:border-color .15s,box-shadow .15s;
+  width:52px;background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r6);
+  color:var(--txt);font-family:var(--mono);font-size:12px;padding:4px 7px;
+  text-align:right;outline:none;transition:border-color .15s,box-shadow .15s;
   -moz-appearance:textfield;appearance:textfield;
 }
 .num-in:focus{border-color:var(--ac);box-shadow:0 0 0 2px var(--ac-glow)}
 .num-in::-webkit-inner-spin-button,.num-in::-webkit-outer-spin-button{opacity:1}
-
 .txt-in{
-  background:var(--s2);border:1px solid var(--bd2);
-  border-radius:var(--r6);color:var(--txt);
-  font-family:var(--mono);font-size:11px;
-  padding:4px 7px;outline:none;
-  transition:border-color .15s,box-shadow .15s;
+  background:var(--s2);border:1px solid var(--bd2);border-radius:var(--r6);
+  color:var(--txt);font-family:var(--mono);font-size:11px;padding:4px 7px;
+  outline:none;transition:border-color .15s,box-shadow .15s;
 }
 .txt-in:focus{border-color:var(--ac);box-shadow:0 0 0 2px var(--ac-glow)}
 .txt-in-sm{width:72px}
 .txt-in-full{width:100%}
 
-/* ══════════════════════════════
-   COLOR DOT
-══════════════════════════════ */
-.dot{
-  width:7px;height:7px;border-radius:50%;
-  display:inline-block;vertical-align:middle;
-  margin-right:6px;flex-shrink:0;
-}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block;vertical-align:middle;margin-right:6px;flex-shrink:0}
 
-/* ══════════════════════════════
-   SCORE COMPONENTS
-══════════════════════════════ */
 .comp-row{
-  display:flex;align-items:center;gap:10px;
-  padding:8px 16px;cursor:pointer;user-select:none;
-  border-top:1px solid var(--bd);
-  transition:background .12s,opacity .15s;
+  display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;user-select:none;
+  border-top:1px solid var(--bd);transition:background .12s,opacity .15s;
 }
 .comp-row:first-child{border-top:none}
 .comp-row:hover{background:rgba(124,109,250,.04)}
 .comp-row.off{opacity:.35}
-
 .comp-check{
-  width:16px;height:16px;
-  background:var(--s3);border:1.5px solid var(--bd2);
-  border-radius:4px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;
-  transition:all .15s;
+  width:16px;height:16px;background:var(--s3);border:1.5px solid var(--bd2);
+  border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s;
 }
-.comp-check.on{
-  background:linear-gradient(135deg,#9c8dff,#5c4dda);
-  border-color:transparent;
-  box-shadow:0 0 8px rgba(124,109,250,.4);
-}
-.comp-check.on::after{
-  content:'';display:block;width:8px;height:5px;
-  border-left:2px solid #fff;border-bottom:2px solid #fff;
-  transform:rotate(-45deg) translateY(-1px);
-}
-
+.comp-check.on{background:linear-gradient(135deg,#9c8dff,#5c4dda);border-color:transparent;box-shadow:0 0 8px rgba(124,109,250,.4)}
+.comp-check.on::after{content:'';display:block;width:8px;height:5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) translateY(-1px)}
 .comp-info{flex:1}
 .comp-name{font-size:12px;color:var(--txt)}
 .comp-desc{font-size:10px;color:var(--txt3);margin-top:1px}
-
-.comp-weight{
-  font-family:var(--mono);font-size:11px;font-weight:500;
-  color:var(--ac2);min-width:34px;text-align:right;
-}
+.comp-weight{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ac2);min-width:34px;text-align:right}
 .comp-weight.zero{color:var(--txt3)}
-
 .wbar-wrap{padding:6px 16px 10px}
-.weight-bar{
-  display:flex;height:4px;border-radius:2px;
-  overflow:hidden;gap:2px;
-  background:var(--s3);border-radius:2px;
-}
+.weight-bar{display:flex;height:4px;border-radius:2px;overflow:hidden;gap:2px;background:var(--s3)}
 .weight-seg{height:100%;border-radius:1px;transition:width .35s cubic-bezier(.4,0,.2,1)}
 
-/* ══════════════════════════════
-   CRAWL SECTION
-══════════════════════════════ */
-.crawl-bar{
-  display:flex;align-items:center;gap:8px;
-  padding:10px 16px 6px;
-}
+.crawl-bar{display:flex;align-items:center;gap:8px;padding:10px 16px 6px}
 .crawl-lbl{font-size:10px;color:var(--txt3);flex:1;font-family:var(--mono)}
-
 .act-btn{
-  font-size:10px;font-weight:600;
-  background:var(--s2);border:1px solid var(--bd2);
-  border-radius:var(--r6);color:var(--txt2);
-  padding:5px 11px;cursor:pointer;
-  font-family:var(--head);letter-spacing:.04em;
-  transition:all .15s;white-space:nowrap;
+  font-size:10px;font-weight:600;background:var(--s2);border:1px solid var(--bd2);
+  border-radius:var(--r6);color:var(--txt2);padding:5px 11px;cursor:pointer;
+  font-family:var(--head);letter-spacing:.04em;transition:all .15s;white-space:nowrap;
 }
-.act-btn:hover:not(:disabled){
-  border-color:var(--ac);color:var(--ac2);
-  box-shadow:0 0 10px var(--ac-glow);
-}
+.act-btn:hover:not(:disabled){border-color:var(--ac);color:var(--ac2);box-shadow:0 0 10px var(--ac-glow)}
 .act-btn:disabled{opacity:.4;cursor:default}
-.act-btn.done{
-  border-color:var(--green);color:var(--green);
-  box-shadow:0 0 10px var(--g-glow);
-}
+.act-btn.done{border-color:var(--green);color:var(--green);box-shadow:0 0 10px var(--g-glow)}
 .act-btn.stop{border-color:var(--red);color:var(--red)}
-
-.comp-prog{
-  font-size:10px;color:var(--txt3);
-  padding:2px 16px 6px;font-family:var(--mono);
-  line-height:1.5;
-}
-
+.comp-prog{font-size:10px;color:var(--txt3);padding:2px 16px 6px;font-family:var(--mono);line-height:1.5}
 .search-wrap{padding:4px 16px 8px}
 
 @keyframes crawlPulse{0%,100%{opacity:1}50%{opacity:.25}}
 .crawl-dot{
-  display:none;width:7px;height:7px;border-radius:50%;
-  background:var(--yellow);margin-left:2px;flex-shrink:0;
-  animation:crawlPulse 1s ease-in-out infinite;
-  box-shadow:0 0 6px var(--y-glow);
+  display:none;width:7px;height:7px;border-radius:50%;background:var(--yellow);
+  margin-left:2px;flex-shrink:0;animation:crawlPulse 1s ease-in-out infinite;box-shadow:0 0 6px var(--y-glow);
 }
 .crawl-dot.active{display:inline-block}
 
-/* I項: prefers-reduced-motion 対応 */
-@media (prefers-reduced-motion: reduce) {
+@media(prefers-reduced-motion:reduce){
   .crawl-dot{animation:none;opacity:.8}
-  .toggle-track,
-  .toggle-thumb,
-  .shd-icon,
-  .arrow,
-  .comp-check,
-  .weight-seg,
-  .act-btn,
-  .section-hd,
-  .comp-row,
-  .row,
-  .stat-card,
-  .stat-card::before{transition:none !important}
+  .toggle-track,.toggle-thumb,.shd-icon,.arrow,.comp-check,.weight-seg,
+  .act-btn,.section-hd,.comp-row,.row,.stat-card,.stat-card::before{transition:none!important}
 }
 
-/* ── RJリスト ── */
 .comp-list{padding:4px 16px 10px;display:flex;flex-direction:column;gap:3px}
 .comp-list-empty{font-size:10px;color:var(--txt3);padding:8px 16px;font-family:var(--mono)}
-
 .comp-item{
-  display:flex;align-items:center;gap:6px;
-  font-family:var(--mono);font-size:10px;color:var(--txt);
-  background:var(--s2);border:1px solid var(--bd);
-  border-radius:var(--r6);padding:5px 8px;
-  transition:border-color .12s;
+  display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--txt);
+  background:var(--s2);border:1px solid var(--bd);border-radius:var(--r6);padding:5px 8px;transition:border-color .12s;
 }
 .comp-item:hover{border-color:var(--bd2)}
 .comp-item-rj{flex:1;color:var(--ac2)}
 .comp-item-del{
-  background:none;border:none;color:var(--txt3);
-  cursor:pointer;font-size:11px;padding:1px 4px;
-  border-radius:3px;line-height:1;transition:all .12s;
+  background:none;border:none;color:var(--txt3);cursor:pointer;font-size:11px;
+  padding:1px 4px;border-radius:3px;line-height:1;transition:all .12s;
 }
 .comp-item-del:hover{color:var(--red);background:rgba(240,64,96,.1)}
 
-/* ══════════════════════════════
-   HELP
-══════════════════════════════ */
 .help-list{padding:4px 0}
 .help-item{border-top:1px solid var(--bd)}
 .help-q{
-  display:flex;align-items:center;gap:8px;
-  padding:8px 16px;cursor:pointer;user-select:none;
-  font-size:11px;font-weight:600;color:var(--txt2);
-  transition:color .12s;
+  display:flex;align-items:center;gap:8px;padding:8px 16px;cursor:pointer;user-select:none;
+  font-size:11px;font-weight:600;color:var(--txt2);transition:color .12s;
 }
 .help-q:hover{color:var(--txt)}
 .h-arrow{margin-left:auto;font-size:8px;color:var(--txt3);transition:transform .2s}
 .help-q.open .h-arrow{transform:rotate(180deg)}
-.help-a{
-  display:none;padding:0 16px 10px 16px;
-  font-size:11px;color:var(--txt3);line-height:1.7;
-}
+.help-a{display:none;padding:0 16px 10px 16px;font-size:11px;color:var(--txt3);line-height:1.7}
 .help-a.open{display:block}
 .help-a strong{color:var(--txt);font-weight:500}
-.help-a code{
-  font-family:var(--mono);font-size:10px;
-  background:var(--ac-faint);color:var(--ac2);
-  padding:1px 5px;border-radius:3px;
-  border:1px solid rgba(124,109,250,.2);
-}
+.help-a code{font-family:var(--mono);font-size:10px;background:var(--ac-faint);color:var(--ac2);padding:1px 5px;border-radius:3px;border:1px solid rgba(124,109,250,.2)}
 
-/* ══════════════════════════════
-   FOOTER
-══════════════════════════════ */
 .footer{
-  padding:9px 16px;
-  display:flex;align-items:center;justify-content:space-between;
-  background:var(--bg);
-  border-top:1px solid var(--bd);
-  position:sticky;bottom:0;z-index:10;
-}
-.footer-hint{
-  font-size:9px;color:var(--txt3);
-  font-family:var(--mono);letter-spacing:.08em;
+  padding:8px 12px;display:flex;align-items:center;gap:8px;
+  background:var(--bg);border-top:1px solid var(--bd);position:sticky;bottom:0;z-index:10;
 }
 .cache-clear{
-  font-size:10px;color:var(--txt3);background:none;
-  border:1px solid var(--bd2);border-radius:var(--r4);
-  padding:3px 9px;cursor:pointer;
-  font-family:var(--sans);transition:all .15s;
+  font-size:10px;color:var(--txt3);background:none;border:1px solid var(--bd2);
+  border-radius:var(--r4);padding:3px 9px;cursor:pointer;font-family:var(--sans);transition:all .15s;
 }
 .cache-clear:hover:not(:disabled){border-color:var(--txt2);color:var(--txt)}
 .cache-clear:disabled{cursor:default;opacity:.4}
@@ -456,11 +233,8 @@ body{
 </head>
 <body>
 
-<!-- ── ヘッダー ── -->
 <div class="hd">
-  <div class="hd-logo">
-    <div class="hd-logo-ring">📊</div>
-  </div>
+  <div class="hd-logo"><div class="hd-logo-ring">📊</div></div>
   <div class="hd-text">
     <div class="hd-title">DLsite Score</div>
     <div class="hd-sub">OVERLAY CONFIG</div>
@@ -468,10 +242,9 @@ body{
   <div class="hd-pill">v1.7</div>
 </div>
 
-<!-- ── 統計ヒーロー ── -->
 <div class="stats-hero">
   <div class="stat-card accent" style="grid-column:1/-1">
-    <div class="stat-lbl">今日の閲覧</div>
+    <div class="stat-lbl">今日の詳細閲覧</div>
     <div class="stat-num" id="statCount">—</div>
     <div class="stat-unit">作品</div>
   </div>
@@ -480,36 +253,15 @@ body{
 <!-- ① 表示設定 -->
 <div class="section">
   <div class="section-hd open" data-target="s-display">
-    <div class="shd-icon">📺</div>
-    <span class="shd-label">表示設定</span>
-    <span class="arrow">▾</span>
+    <div class="shd-icon">📺</div><span class="shd-label">表示設定</span><span class="arrow">▾</span>
   </div>
   <div class="section-body open" id="s-display">
+    <div class="row"><span class="row-icon">📌</span><span class="row-label">右上オーバーレイ</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showOverlay" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
+    <div class="row"><span class="row-icon">🃏</span><span class="row-label">カードスコア</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showCards" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
+    <div class="row"><span class="row-icon">🔤</span><span class="row-label">文字スコア（良/可/不）</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="useTextScore"><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
+    <div class="row"><span class="row-icon">⚠️</span><span class="row-label">定期セール警告</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showSaleWarning" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
     <div class="row">
-      <span class="row-icon">📌</span>
-      <span class="row-label">右上オーバーレイ</span>
-      <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showOverlay" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div>
-    </div>
-    <div class="row">
-      <span class="row-icon">🃏</span>
-      <span class="row-label">カードスコア</span>
-      <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showCards" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div>
-    </div>
-    <div class="row">
-      <span class="row-icon">🔤</span>
-      <span class="row-label">文字スコア（良/可/不）</span>
-      <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="useTextScore"><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div>
-    </div>
-    <div class="row">
-      <span class="row-icon">⚠️</span>
-      <span class="row-label">定期セール警告</span>
-      <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showSaleWarning" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div>
-    </div>
-    <div class="row">
-      <div style="flex:1">
-        <div class="row-label">このスコア未満を薄く</div>
-        <div class="row-sub">0 = 無効</div>
-      </div>
+      <div style="flex:1"><div class="row-label">このスコア未満を薄く</div><div class="row-sub">0 = 無効</div></div>
       <div class="row-ctrl"><input class="num-in" type="number" id="dimBelow" min="0" max="100" value="0" inputmode="numeric"></div>
     </div>
   </div>
@@ -518,108 +270,45 @@ body{
 <!-- ② スコア閾値 -->
 <div class="section">
   <div class="section-hd open" data-target="s-thresh">
-    <div class="shd-icon">🎯</div>
-    <span class="shd-label">スコア閾値</span>
-    <span class="arrow">▾</span>
+    <div class="shd-icon">🎯</div><span class="shd-label">スコア閾値</span><span class="arrow">▾</span>
   </div>
   <div class="section-body open" id="s-thresh">
-    <div class="row">
-      <span class="dot" style="background:var(--green);box-shadow:0 0 6px var(--g-glow)"></span>
-      <span class="row-label">良（以上）</span>
-      <div class="row-ctrl"><input class="num-in" type="number" id="green" min="1" max="100" value="75" inputmode="numeric"></div>
-    </div>
-    <div class="row">
-      <span class="dot" style="background:var(--yellow);box-shadow:0 0 6px var(--y-glow)"></span>
-      <span class="row-label">可（以上）</span>
-      <div class="row-ctrl"><input class="num-in" type="number" id="yellow" min="0" max="99" value="50" inputmode="numeric"></div>
-    </div>
+    <div class="row"><span class="dot" style="background:var(--green);box-shadow:0 0 6px var(--g-glow)"></span><span class="row-label">良（以上）</span><div class="row-ctrl"><input class="num-in" type="number" id="green" min="1" max="100" value="75" inputmode="numeric"></div></div>
+    <div class="row"><span class="dot" style="background:var(--yellow);box-shadow:0 0 6px var(--y-glow)"></span><span class="row-label">可（以上）</span><div class="row-ctrl"><input class="num-in" type="number" id="yellow" min="0" max="99" value="50" inputmode="numeric"></div></div>
   </div>
 </div>
 
 <!-- ③ スコアラベル -->
 <div class="section">
   <div class="section-hd" data-target="s-label">
-    <div class="shd-icon">🏷️</div>
-    <span class="shd-label">スコアラベル</span>
-    <span class="arrow">▾</span>
+    <div class="shd-icon">🏷️</div><span class="shd-label">スコアラベル</span><span class="arrow">▾</span>
   </div>
   <div class="section-body" id="s-label">
-    <div class="row">
-      <span class="dot" style="background:var(--green)"></span>
-      <span class="row-label">緑ラベル</span>
-      <div class="row-ctrl"><input class="txt-in txt-in-sm" type="text" id="labelGreen" maxlength="8" placeholder="買い時"></div>
-    </div>
-    <div class="row">
-      <span class="dot" style="background:var(--yellow)"></span>
-      <span class="row-label">黄ラベル</span>
-      <div class="row-ctrl"><input class="txt-in txt-in-sm" type="text" id="labelYellow" maxlength="8" placeholder=""></div>
-    </div>
-    <div class="row">
-      <span class="dot" style="background:var(--red)"></span>
-      <span class="row-label">赤ラベル</span>
-      <div class="row-ctrl"><input class="txt-in txt-in-sm" type="text" id="labelRed" maxlength="8" placeholder=""></div>
-    </div>
+    <div class="row"><span class="dot" style="background:var(--green)"></span><span class="row-label">緑ラベル</span><div class="row-ctrl"><input class="txt-in txt-in-sm" type="text" id="labelGreen" maxlength="8" placeholder="買い時"></div></div>
+    <div class="row"><span class="dot" style="background:var(--yellow)"></span><span class="row-label">黄ラベル</span><div class="row-ctrl"><input class="txt-in txt-in-sm" type="text" id="labelYellow" maxlength="8" placeholder=""></div></div>
+    <div class="row"><span class="dot" style="background:var(--red)"></span><span class="row-label">赤ラベル</span><div class="row-ctrl"><input class="txt-in txt-in-sm" type="text" id="labelRed" maxlength="8" placeholder=""></div></div>
   </div>
 </div>
 
 <!-- ④ スコア計算要素 -->
 <div class="section">
   <div class="section-hd" data-target="s-comp">
-    <div class="shd-icon">⚖️</div>
-    <span class="shd-label">計算要素</span>
-    <span class="arrow">▾</span>
+    <div class="shd-icon">⚖️</div><span class="shd-label">計算要素</span><span class="arrow">▾</span>
   </div>
   <div class="section-body" id="s-comp">
-    <div class="comp-row" data-key="compPosition">
-      <div class="comp-check on"></div>
-      <div class="comp-info">
-        <div class="comp-name">価格ポジション</div>
-        <div class="comp-desc">最安値〜定価の中でどこにいるか</div>
-      </div>
-      <div class="comp-weight">50%</div>
-    </div>
-    <div class="comp-row" data-key="compDiscount">
-      <div class="comp-check on"></div>
-      <div class="comp-info">
-        <div class="comp-name">割引率</div>
-        <div class="comp-desc">定価からの下げ幅</div>
-      </div>
-      <div class="comp-weight">25%</div>
-    </div>
-    <div class="comp-row" data-key="compRarity">
-      <div class="comp-check on"></div>
-      <div class="comp-info">
-        <div class="comp-name">希少性</div>
-        <div class="comp-desc">セール頻度が低いほど今が買い時</div>
-      </div>
-      <div class="comp-weight">15%</div>
-    </div>
-    <div class="comp-row" data-key="compTrend">
-      <div class="comp-check on"></div>
-      <div class="comp-info">
-        <div class="comp-name">トレンド</div>
-        <div class="comp-desc">最近の価格が上昇傾向か</div>
-      </div>
-      <div class="comp-weight">10%</div>
-    </div>
-    <div class="wbar-wrap">
-      <div class="weight-bar">
-        <div class="weight-seg" style="background:var(--ac);width:50%" id="seg-0"></div>
-        <div class="weight-seg" style="background:var(--green);width:25%" id="seg-1"></div>
-        <div class="weight-seg" style="background:var(--yellow);width:15%" id="seg-2"></div>
-        <div class="weight-seg" style="background:var(--red);width:10%" id="seg-3"></div>
-      </div>
-    </div>
+    <div class="comp-row" data-key="compPosition"><div class="comp-check on"></div><div class="comp-info"><div class="comp-name">価格ポジション</div><div class="comp-desc">最安値〜定価の中でどこにいるか</div></div><div class="comp-weight">50%</div></div>
+    <div class="comp-row" data-key="compDiscount"><div class="comp-check on"></div><div class="comp-info"><div class="comp-name">割引率</div><div class="comp-desc">定価からの下げ幅</div></div><div class="comp-weight">25%</div></div>
+    <div class="comp-row" data-key="compRarity"><div class="comp-check on"></div><div class="comp-info"><div class="comp-name">希少性</div><div class="comp-desc">セール頻度が低いほど今が買い時</div></div><div class="comp-weight">15%</div></div>
+    <div class="comp-row" data-key="compTrend"><div class="comp-check on"></div><div class="comp-info"><div class="comp-name">トレンド</div><div class="comp-desc">最近の価格が上昇傾向か</div></div><div class="comp-weight">10%</div></div>
+    <div class="wbar-wrap"><div class="weight-bar"><div class="weight-seg" style="background:var(--ac);width:50%" id="seg-0"></div><div class="weight-seg" style="background:var(--green);width:25%" id="seg-1"></div><div class="weight-seg" style="background:var(--yellow);width:15%" id="seg-2"></div><div class="weight-seg" style="background:var(--red);width:10%" id="seg-3"></div></div></div>
   </div>
 </div>
 
 <!-- ⑤ 総集編 -->
 <div class="section">
   <div class="section-hd" data-target="s-comp-list">
-    <div class="shd-icon">📦</div>
-    <span class="shd-label">総集編マーク</span>
-    <span class="crawl-dot" id="crawlDot"></span>
-    <span class="arrow">▾</span>
+    <div class="shd-icon">📦</div><span class="shd-label">総集編マーク</span>
+    <span class="crawl-dot" id="crawlDot"></span><span class="arrow">▾</span>
   </div>
   <div class="section-body" id="s-comp-list">
     <div class="crawl-bar">
@@ -629,9 +318,7 @@ body{
       <button class="act-btn stop" id="stopCompBtn" style="display:none">■ 停止</button>
     </div>
     <div id="compProgress" class="comp-prog" style="display:none"></div>
-    <div class="search-wrap">
-      <input id="compSearch" class="txt-in txt-in-full" type="search" placeholder="RJ検索…" autocomplete="off">
-    </div>
+    <div class="search-wrap"><input id="compSearch" class="txt-in txt-in-full" type="search" placeholder="RJ検索…" autocomplete="off"></div>
     <div id="compListContainer"></div>
   </div>
 </div>
@@ -639,42 +326,33 @@ body{
 <!-- ⑥ ヘルプ -->
 <div class="section">
   <div class="section-hd" data-target="s-help">
-    <div class="shd-icon">❓</div>
-    <span class="shd-label">ヘルプ</span>
-    <span class="arrow">▾</span>
+    <div class="shd-icon">❓</div><span class="shd-label">ヘルプ</span><span class="arrow">▾</span>
   </div>
   <div class="section-body" id="s-help">
     <div class="help-list" id="helpList"></div>
   </div>
 </div>
 
-<!-- データ管理 -->
+<!-- ⑦ データ管理 -->
 <div class="section">
   <div class="section-hd" data-target="s-data">
-    <div class="shd-icon">🗑️</div>
-    <span class="shd-label">データ管理</span>
-    <span class="arrow">▾</span>
+    <div class="shd-icon">🗑️</div><span class="shd-label">データ管理</span><span class="arrow">▾</span>
   </div>
   <div class="section-body" id="s-data">
     <div class="row">
-      <div style="flex:1">
-        <div class="row-label">スコアDBリセット</div>
-        <div class="row-sub">キャッシュを削除、次回アクセス時に再取得</div>
-      </div>
+      <div style="flex:1"><div class="row-label">スコアDBリセット</div><div class="row-sub">キャッシュを削除、次回アクセス時に再取得</div></div>
       <div class="row-ctrl"><button class="act-btn" id="clearScoreDb">🔢 リセット</button></div>
     </div>
     <div class="row">
-      <div style="flex:1">
-        <div class="row-label" style="color:var(--red)">総集編データ初期化</div>
-        <div class="row-sub">収集済みRJ・走査状態を全削除（要再収集）</div>
-      </div>
+      <div style="flex:1"><div class="row-label" style="color:var(--red)">総集編データ初期化</div><div class="row-sub">収集済みRJ・走査状態を全削除（要再収集）</div></div>
       <div class="row-ctrl"><button class="act-btn" id="clearAllData" style="border-color:var(--red);color:var(--red)">📦 初期化</button></div>
     </div>
   </div>
 </div>
 
 <div class="footer">
-  <span class="footer-hint">CACHE TTL · 6H / IDB</span>
+  <button class="act-btn" id="openAnalytics" style="font-size:10px;padding:3px 10px">📊 分析</button>
+  <span style="flex:1"></span>
   <button class="cache-clear" id="cacheClear">キャッシュ削除</button>
 </div>
 

@@ -407,6 +407,51 @@
     });
   }
 
+  // 右上統計オーバーレイ（閲覧数・平均スコア）
+  function renderStatsOverlay() {
+    const today = jstDateStr();
+    chrome.storage.local.get({ [STATS_KEY]: {} }, res => {
+      if (chrome.runtime.lastError) return;
+      const todaySt = (res[STATS_KEY] || {})[today];
+      if (!todaySt?.count) { document.querySelector("#dlscore-stats")?.remove(); return; }
+
+      let el = document.querySelector("#dlscore-stats");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "dlscore-stats";
+        el.style.cssText = [
+          "position:fixed", "z-index:2147483646",
+          "font-size:11px", "font-family:sans-serif", "line-height:1.3",
+          "background:rgba(255,255,255,0.92)", "color:#333",
+          "border:1px solid #ccc", "border-radius:5px",
+          "padding:4px 8px", "box-shadow:0 1px 6px rgba(0,0,0,.15)",
+          "pointer-events:none",
+        ].join(";");
+        document.body.appendChild(el);
+      }
+
+      const avg = todaySt.count > 0 ? Math.round(todaySt.totalScore / todaySt.count) : 0;
+      el.textContent = `👁 ${todaySt.count}作品  avg ${avg}`;
+
+      // 詳細ページでは #dlscore-main の直下、一覧では右上固定
+      const mainEl = document.querySelector("#dlscore-main");
+      if (mainEl && isDetail) {
+        // requestAnimationFrame で #dlscore-main の位置確定後に配置
+        requestAnimationFrame(() => {
+          if (!el.isConnected) return;
+          const r = mainEl.getBoundingClientRect();
+          el.style.top   = `${r.bottom + 6}px`;
+          el.style.right = "12px";
+          el.style.left  = "";
+        });
+      } else {
+        el.style.top   = IS_TOUCH ? "56px" : "12px";
+        el.style.left  = "12px";
+        el.style.right = "";
+      }
+    });
+  }
+
   function renderMain(result, isNewLowest, data) {
     let el = document.querySelector("#dlscore-main");
     if (!settings.showOverlay) {
@@ -520,6 +565,8 @@
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
+    // STATS_KEY のみの変更でも統計オーバーレイを更新
+    if (STATS_KEY in changes) renderStatsOverlay();
     if (Object.keys(changes).every(k => k === STATS_KEY)) return;
     if (COMPILATION_KEY in changes) {
       loadCompilations(() => updateCompilationBadges());
@@ -554,6 +601,7 @@
     _pendingCards.clear();
     if (_lazyObserver) { _lazyObserver.disconnect(); _lazyObserver = null; }
     document.querySelector("#dlscore-main")?.remove();
+    document.querySelector("#dlscore-stats")?.remove();
     document.querySelectorAll("[data-dlscore-card]").forEach(el => el.remove());
     document.querySelectorAll("[data-dlscore-done]").forEach(el => { delete el.dataset.dlscoreDone; });
     runList();
@@ -690,6 +738,7 @@
         renderMain(result, checkPriceAlert(localRJ, data), data);
         recordStat(localRJ, result.score);        // 詳細ページのみカウント
         recordGenreHistory(localRJ, result.score); // ジャンル履歴記録
+        renderStatsOverlay();                       // 統計オーバーレイ更新
         const map       = extractRJCardMap();
         const mainCards = map.get(localRJ);
         if (mainCards?.size > 0) {
@@ -745,6 +794,7 @@
         mainRJ   = getMainRJ(location.href);
         isDetail = getIsDetail();
         document.querySelector("#dlscore-main")?.remove();
+        document.querySelector("#dlscore-stats")?.remove();
         document.querySelectorAll("[data-dlscore-card]").forEach(el => el.remove());
         document.querySelectorAll("[data-dlscore-done]").forEach(el => { delete el.dataset.dlscoreDone; });
         fetchedRJs.clear();

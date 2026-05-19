@@ -16,6 +16,8 @@ const _REFRESH_ALARM   = "dlscore_score_refresh";
 
 // H項: FETCH dedup map — 同一RJへの重複リクエストを1回にまとめる
 const _pendingFetches = new Map(); // rj → [sendResponse, ...]
+// A項: abort all — SPA遷移時に進行中の全fetchをキャンセルするためのAbortController管理
+const _activeFetches  = new Map(); // rj → AbortController
 
 // ── bug③修正: SW 再起動時に残留「走査中」フラグをクリア ──
 // _crawlerTabId は再起動で null にリセットされるが storage の running フラグは残る
@@ -298,6 +300,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // ── A項: SPA遷移時に全fetchをキャンセル ──
+  if (msg.type === "ABORT_ALL_FETCHES") {
+    // 進行中のHTTPリクエストを全abort
+    for (const ctrl of _activeFetches.values()) {
+      try { ctrl.abort(); } catch {}
+    }
+    _activeFetches.clear();
+    // dedup待ちコールバックにもabortを返す
+    for (const callbacks of _pendingFetches.values()) {
+      callbacks.forEach(cb => { try { cb({ ok: false, err: "aborted" }); } catch {} });
+    }
+    _pendingFetches.clear();
+    sendResponse({ ok: true });
+    return;
+  }
+
   // ── 価格データ取得（IndexedDB → dlwatcher.com の順でキャッシュ優先）──
   // H項: dedup — 同じRJが同時に複数リクエストされたとき1回にまとめる
   if (msg.type === "FETCH") {
@@ -333,16 +351,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const url        = "https://dlwatcher.com/product/" + rjKey + ".json";
         const controller = new AbortController();
         const timer      = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        _activeFetches.set(rjKey, controller); // A項: abort管理に登録
         try {
           const res  = await fetch(url, { signal: controller.signal });
           if (!res.ok) throw new Error("HTTP " + res.status);
           const data = await res.json();
           clearTimeout(timer);
+          _activeFetches.delete(rjKey);
           await _saveScore(rjKey, data);
           clearTimeout(_globalTimer);
           _broadcast({ ok: true, data });
         } catch (err) {
           clearTimeout(timer);
+          _activeFetches.delete(rjKey);
           clearTimeout(_globalTimer);
           _broadcast({ ok: false, err: String(err) });
         }

@@ -45,15 +45,27 @@
 
   let settings = { ...DEFAULTS };
 
-  let cache = (() => {
-    try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; }
-    catch { return {}; }
-  })();
+  // F項: JSON corruption recovery — 破損を検知したらキーを削除して空オブジェクトを返す
+  function _safeParseLS(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        console.warn("[DLscore] corrupted LS, clearing:", key);
+        localStorage.removeItem(key);
+        return {};
+      }
+      return parsed;
+    } catch {
+      console.warn("[DLscore] parse error, clearing:", key);
+      try { localStorage.removeItem(key); } catch {}
+      return {};
+    }
+  }
 
-  let priceHist = (() => {
-    try { return JSON.parse(localStorage.getItem(PRICE_HIST_KEY)) || {}; }
-    catch { return {}; }
-  })();
+  let cache     = _safeParseLS(CACHE_KEY);
+  let priceHist = _safeParseLS(PRICE_HIST_KEY);
 
   let lastPrune = 0;
   let lsTimer   = null;
@@ -183,13 +195,15 @@
   function loadSeenRJs() {
     try {
       const stored = JSON.parse(localStorage.getItem(SEEN_RJS_KEY));
-      if (stored && stored.date === jstDateStr()) {
+      // F項: rjs が配列でない場合も破損とみなしてクリア
+      if (stored && stored.date === jstDateStr() && Array.isArray(stored.rjs)) {
         seenRJsToday = new Set(stored.rjs);
       } else {
         seenRJsToday = new Set();
         saveSeenRJs();
       }
     } catch {
+      try { localStorage.removeItem(SEEN_RJS_KEY); } catch {}
       seenRJsToday = new Set();
     }
   }
@@ -386,24 +400,53 @@
 
   let _pageVersion = 0;
 
+  // E項: tooltip singleton — 全要素でグローバル1要素を使い回す（tooltip増殖防止）
+  let _tipEl       = null;
+  let _tipTimer    = null;
+  let _tipOwner    = null;
+
+  function _getTipEl() {
+    if (_tipEl && _tipEl.isConnected) return _tipEl;
+    _tipEl = document.createElement("div");
+    _tipEl.style.cssText = [
+      "position:fixed", "z-index:2147483647",
+      "background:#222", "color:#eee", "font-size:11px",
+      "padding:6px 8px", "border-radius:5px",
+      "white-space:pre-wrap", "box-shadow:0 2px 8px rgba(0,0,0,.4)",
+      "pointer-events:none", "display:none", "max-width:200px",
+    ].join(";");
+    document.body.appendChild(_tipEl);
+    return _tipEl;
+  }
+
+  function _hideTip() {
+    if (_tipEl) _tipEl.style.display = "none";
+    _tipOwner = null;
+    clearTimeout(_tipTimer);
+  }
+
   function attachTouchTooltip(el, getTooltipText) {
     if (!IS_TOUCH) return;
-    let tip = null;
     el.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (tip) { tip.remove(); tip = null; return; }
-      tip = document.createElement("div");
-      tip.style.cssText = [
-        "position:absolute", "z-index:2147483647",
-        "background:#222", "color:#eee", "font-size:11px",
-        "padding:6px 8px", "border-radius:5px",
-        "white-space:pre", "box-shadow:0 2px 8px rgba(0,0,0,.4)",
-        "pointer-events:none",
-      ].join(";");
+      const tip = _getTipEl();
+      // 同じ要素の再タップで非表示
+      if (_tipOwner === el) { _hideTip(); return; }
+      _hideTip();
       tip.textContent = getTooltipText();
-      el.style.position = el.style.position || "relative";
-      el.appendChild(tip);
-      setTimeout(() => { tip?.remove(); tip = null; }, 3000);
+      tip.style.display = "block";
+      // クリック位置の近くに配置（画面端を越えないようにクランプ）
+      const rect = el.getBoundingClientRect();
+      const vw   = window.innerWidth;
+      const vh   = window.innerHeight;
+      let top  = rect.bottom + 4;
+      let left = rect.left;
+      if (top + 80 > vh)  top  = rect.top - 80;
+      if (left + 200 > vw) left = vw - 208;
+      tip.style.top  = `${Math.max(0, top)}px`;
+      tip.style.left = `${Math.max(0, left)}px`;
+      _tipOwner = el;
+      _tipTimer = setTimeout(_hideTip, 3000);
     });
   }
 
@@ -776,6 +819,8 @@
     window.__dlscoreUrl = newUrl;
     _pageVersion++;
     spaRunning = true;
+    // A項: background の進行中fetchを全キャンセル
+    chrome.runtime.sendMessage({ type: "ABORT_ALL_FETCHES" }, () => { void chrome.runtime.lastError; });
     clearTimeout(mutTimer);
     clearTimeout(domStableTimer);
 
@@ -805,6 +850,7 @@
         _pendingCards.clear();
         if (_lazyObserver) { _lazyObserver.disconnect(); _lazyObserver = null; }
         runList();
+        _setupObserver(); // C項: SPA遷移後に監視ターゲットを再設定
         if (mainRJ && (isDetail || isDetailUrl(location.href))) {
           isDetail = true;
           fetchMainRJ();
@@ -897,8 +943,17 @@
     ? (fn) => requestIdleCallback(fn, { timeout: 1000 })
     : (fn) => setTimeout(fn, 200);
 
-  let mutTimer = null;
-  new MutationObserver((mutations) => {
+  // C項: MutationObserver scope限定 — DLsiteのメインコンテンツ領域のみ監視（body全体監視を回避）
+  function _getMutTarget() {
+    return document.querySelector(
+      "#search_result, #work_list, #center_column, main, #main, .wrapper"
+    ) || document.body;
+  }
+
+  let mutTimer    = null;
+  let _mutObserver = null;
+
+  const _mutCallback = (mutations) => {
     if (spaRunning) return;
     let hasPreview   = false;
     let hasNewRJLink = false;
@@ -918,7 +973,14 @@
       clearTimeout(mutTimer);
       mutTimer = setTimeout(() => scheduleIdle(runList), 100);
     }
-  }).observe(document.body, { childList: true, subtree: true });
+  };
+
+  function _setupObserver() {
+    if (_mutObserver) { _mutObserver.disconnect(); _mutObserver = null; }
+    _mutObserver = new MutationObserver(_mutCallback);
+    _mutObserver.observe(_getMutTarget(), { childList: true, subtree: true });
+  }
+  _setupObserver();
 
   chrome.storage.local.get(DEFAULTS, (vals) => {
     if (!chrome.runtime.lastError) settings = vals;

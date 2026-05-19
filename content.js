@@ -151,11 +151,17 @@
                      ?.textContent?.trim() || "";
     const circle = document.querySelector(".maker_name a, a[href*='maker_id']")
                      ?.textContent?.trim() || "";
+    // 画像URL（次回スライド表示に使用）
+    const imgUrl =
+      document.querySelector("meta[property='og:image']")?.content ||
+      document.querySelector("img[itemprop='image']")?.src ||
+      document.querySelector(".work_right_info img, .slider_item img, .product_slider img")?.src ||
+      "";
     if (!genres.length && !title) return;
     chrome.storage.local.get({ [GENRE_HIST_KEY]: {} }, res => {
       if (chrome.runtime.lastError) return;
       const hist = res[GENRE_HIST_KEY];
-      hist[rj] = { title, genres, circle, score, viewedAt: Date.now() };
+      hist[rj] = { title, genres, circle, score, viewedAt: Date.now(), imgUrl };
       const keys = Object.keys(hist).sort((a, b) => (hist[a].viewedAt || 0) - (hist[b].viewedAt || 0));
       while (keys.length > 500) { delete hist[keys.shift()]; }
       chrome.storage.local.set({ [GENRE_HIST_KEY]: hist });
@@ -766,6 +772,8 @@
   history.replaceState = function (...a) { _replace(...a); onUrlChange(); };
   window.addEventListener("popstate",          onUrlChange);
   window.addEventListener("dlscore:urlchange", onUrlChange);
+  // カウントバグ修正: pagehide でページ離脱前に確実にflush
+  window.addEventListener("pagehide", () => { if (statsDirty) flushStats(); });
 
   let compilationSet = new Set();
 

@@ -145,8 +145,38 @@ canvas{border-radius:50%;display:block}
 .genre-link:hover{border-color:var(--ac);box-shadow:0 0 8px var(--ac-glow)}
 
 @media(prefers-reduced-motion:reduce){
-  .tab,.work-card,.genre-link{transition:none!important}
+  .tab,.work-card,.genre-link,.period-btn{transition:none!important}
 }
+
+/* CONTROLS */
+.graph-controls{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.period-btns{display:flex;gap:4px;flex-wrap:wrap}
+.period-btn{
+  font-size:10px;font-family:var(--mono);
+  background:var(--s2);border:1px solid var(--bd2);
+  border-radius:4px;color:var(--txt3);padding:4px 10px;
+  cursor:pointer;transition:all .15s;
+}
+.period-btn:hover{border-color:var(--ac);color:var(--ac2)}
+.period-btn.active{background:var(--ac-faint);border-color:var(--ac);color:var(--ac2)}
+.chart-toggle{
+  font-size:10px;font-family:var(--mono);
+  background:var(--s2);border:1px solid var(--bd2);
+  border-radius:4px;color:var(--txt2);padding:4px 10px;
+  cursor:pointer;transition:all .15s;margin-left:auto;
+}
+.chart-toggle:hover{border-color:var(--ac);color:var(--ac2)}
+
+/* BAR CHART */
+.bar-wrap{align-items:stretch}
+.bar-chart{display:flex;flex-direction:column;gap:6px;width:100%}
+.bar-row{display:flex;align-items:center;gap:8px}
+.bar-label{font-size:11px;color:var(--txt);min-width:80px;max-width:120px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
+.bar-track{flex:1;height:14px;background:var(--s3);border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px;transition:width .35s cubic-bezier(.4,0,.2,1)}
+.bar-val{font-family:var(--mono);font-size:10px;color:var(--txt2);min-width:52px;text-align:right}
+.bar-cnt{color:var(--txt3)}
 </style>
 </head>
 <body>

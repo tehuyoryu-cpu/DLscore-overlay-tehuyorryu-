@@ -30,6 +30,7 @@ body{
   background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:12px;
   width:320px;min-width:320px;max-width:320px;
   overflow-x:hidden;overflow-y:auto;max-height:600px;scrollbar-gutter:stable;
+  opacity:0;transition:opacity .1s ease; /* G項: FOUC防止 */
 }
 
 .hd{

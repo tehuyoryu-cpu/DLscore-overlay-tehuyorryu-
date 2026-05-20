@@ -451,6 +451,9 @@ function initPopup() {
   }
 
   chrome.storage.local.get(DEFAULTS, (s) => {
+    // G項: hydration — ストレージ読み込み完了後にUIを表示（未初期化状態の一瞬を隠す）
+    document.body.style.opacity = "1";
+
     if (chrome.runtime.lastError) {
       console.warn("[DLscore popup] storage error:", chrome.runtime.lastError.message);
       s = { ...DEFAULTS };
@@ -547,3 +550,6 @@ if (document.readyState === "loading") {
   initHelp();
   initPopup();
 }
+
+// G項: ストレージ読み込みが長引いた場合のフォールバック表示（300ms上限）
+setTimeout(() => { document.body.style.opacity = "1"; }, 300);

@@ -3,6 +3,8 @@
 // ここではタブの開閉管理・AI レビュー・FETCH メッセージのみを担う。
 
 // ── keepalive（MV3 サービスワーカーのスリープ防止）──
+// H項: setInterval だけでは Firefox MV3 でsuspendされる
+//       chrome.alarms と併用して確実に起こし続ける
 setInterval(() => {
   chrome.storage.local.get(null, () => { void chrome.runtime.lastError; });
 }, 20_000);
@@ -13,6 +15,7 @@ const _COMP_KEY        = "dlsite_compilations_v1";
 const FETCH_TIMEOUT_MS = 15_000;
 const _SCORE_TTL       = 6 * 60 * 60 * 1000;
 const _REFRESH_ALARM   = "dlscore_score_refresh";
+const _KEEPALIVE_ALARM = "dlscore_keepalive";  // H項: 1分ごとにSWを起こす
 
 // H項: FETCH dedup map — 同一RJへの重複リクエストを1回にまとめる
 const _pendingFetches = new Map(); // rj → [sendResponse, ...]
@@ -69,11 +72,18 @@ async function _saveScore(rj, data) {
 
 // ── 定期スコア更新アラーム（6時間ごと）──
 chrome.alarms.create(_REFRESH_ALARM, {
-  delayInMinutes:  60,   // 初回は起動1時間後
-  periodInMinutes: 360,  // 以降6時間ごと
+  delayInMinutes:  60,
+  periodInMinutes: 360,
 });
+// H項: 1分ごとのkeepalive alarm（Firefox MV3 suspend対策）
+chrome.alarms.create(_KEEPALIVE_ALARM, { periodInMinutes: 1 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  // H項: keepalive — SWが起きていることをstorage操作で確認
+  if (alarm.name === _KEEPALIVE_ALARM) {
+    chrome.storage.local.get(null, () => { void chrome.runtime.lastError; });
+    return;
+  }
   if (alarm.name !== _REFRESH_ALARM) return;
   if (_crawlerTabId !== null) return; // 既に走査中なら skip
 

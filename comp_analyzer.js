@@ -230,8 +230,34 @@ function scoreCandidate(comp, cand) {
   return {rj:cand.rj, score, reasons:why, pageCount:cand.pageCount||0};
 }
 
+/**
+ * DLsite の product/info/ajax レスポンスから1件分のデータを取り出す。
+ * detailFetcher.js の _apiFetch / parser.js の parseProductInfo と同じ正規化を行う:
+ * レスポンスはRJコードをキーにしたオブジェクトで返り、大文字化・ゼロ埋め有無の
+ * 揺れがあるため両対応でキーを探す。
+ */
+function _extractInfoEntry(body, rj) {
+  if (!body || typeof body !== "object") return null;
+  const upper = rj.toUpperCase();
+  const nopad = upper.replace(/^RJ0+/, "RJ");
+  if (body[upper] != null) return body[upper];
+  if (body[nopad] != null) return body[nopad];
+  for (const k of Object.keys(body)) {
+    const ku = k.toUpperCase();
+    if (ku === upper || ku.replace(/^RJ0+/, "RJ") === nopad) return body[k];
+  }
+  return null;
+}
+
 async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldContinue=()=>true) {
-  const INFO_URL   = rj=>`https://www.dlsite.com/home/product/info/=/product_id/${rj}.json`;
+  // 修正: 以前は `/home/product/info/=/product_id/${rj}.json` という、パス形式の
+  // URLセグメントと.json拡張子が混在した誤ったURLを使っており、実際のDLsite APIの
+  // 形とは異なっていた（サイレントに失敗し、この推定機能自体が動いていなかった
+  // 可能性が高い）。detailFetcher.js の _apiFetch と同じ product/info/ajax
+  // エンドポイント（product_id[]形式のクエリ）に統一する。
+  // レスポンスはRJコードをキーにしたオブジェクトで返るため、_extractInfoEntry() で
+  // 大文字化・ゼロ埋めなし版の両対応で取り出す。
+  const INFO_URL   = rj=>`https://www.dlsite.com/home/product/info/ajax?product_id%5B%5D=${encodeURIComponent(rj)}&cdn_cache_min=1`;
   const CIRCLE_URL = (id,p)=>`https://www.dlsite.com/maniax/fsr/=/maker_id/${id}/per_page/100/page/${p}/show_type/1`;
   const MAX_API    = 30;
   const CONCUR     = 5;
@@ -268,9 +294,10 @@ async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldCon
       const i=idx++;
       if(i>=ranked.length) break;
       const {rj}=ranked[i];
-      let info;
-      try{info=await getJSON(INFO_URL(rj));}
+      let body, info;
+      try{body=await getJSON(INFO_URL(rj));}
       catch{continue;}
+      info=_extractInfoEntry(body, rj);
       if(!info) continue;
 
       const genres=info.genres||[];

@@ -124,12 +124,21 @@ async function _saveScore(rj, data) {
 }
 
 // ── 汎用: タイムアウト付き fetch → JSON（失敗時は null）──
+// セキュリティ強化: Content-Length が異常に大きいレスポンスは事前に弾く
+// (共有DBリポジトリが乗っ取られた場合の帯域/メモリDoSへの防御)。
+const _GH_MAX_BYTES = 4 * 1024 * 1024; // 4MB（shard/indexファイルとして十分すぎる余裕）
+
 async function _fetchJSON(url) {
   const controller = new AbortController();
   const timer      = setTimeout(() => controller.abort(), _GITHUB_TIMEOUT_MS);
   try {
     const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
     if (!res.ok) return null;
+    const cl = res.headers.get("content-length");
+    if (cl && Number(cl) > _GH_MAX_BYTES) {
+      console.warn("[DLscore] GitHub raw response too large, skipping:", url, cl);
+      return null;
+    }
     return await res.json();
   } catch {
     return null;
@@ -187,9 +196,12 @@ async function _getGithubManifest() {
 // 1キー(_ghIndexCache)の中に idxId ごとのキャッシュをネストして持たせる
 // (storage.localのキー数を増やさず、CLEAR_SCORE_DB/CLEAR_ALL_DATA でも1回のremoveで済む)。
 async function _getGithubIndex(manifest, rj) {
-  const idxShards = manifest.idxShards ?? _DEFAULT_IDX_SHARDS;
-  const idxId     = _fnv1a(rj) % idxShards;
-  const idxPath   = `index/${String(idxId).padStart(2, "0")}.json`;
+  const rawIdxShards = manifest.idxShards;
+  const idxShards = (Number.isInteger(rawIdxShards) && rawIdxShards > 0)
+    ? rawIdxShards
+    : _DEFAULT_IDX_SHARDS; // manifestの値が不正(型崩れ/0/負数)なら既定値にフォールバック
+  const idxId   = _fnv1a(rj) % idxShards;
+  const idxPath = `index/${String(idxId).padStart(2, "0")}.json`;
 
   const all    = (await _storageGet("_ghIndexCache")) || {};
   const cached = all[idxId];
@@ -227,14 +239,24 @@ async function _getGithubShard(shardId, ttlMs) {
 //   data.recentSalePriceLog
 // を参照する前提で書かれているため、ここで変換して content.js 側は無改修のまま動かす。
 function _adaptShardEntry(e) {
-  const regular = e.p;
-  const current = e.s ?? e.p;
-  const lowest  = e.lp ?? e.p;
+  if (!e || typeof e !== "object") return null;
+
+  const toNum = (v, fallback) => (typeof v === "number" && Number.isFinite(v)) ? v : fallback;
+
+  const regular = toNum(e.p, 0);
+  const current = toNum(e.s, regular);
+  const lowest  = toNum(e.lp, regular);
+  const dd      = Math.max(0, Math.min(365, toNum(e.dd, 0)));
+  // 配列でない/巨大な配列は無視（共有DBが乗っ取られた場合のメモリDoS対策として長さも制限）
+  const lg = Array.isArray(e.lg)
+    ? e.lg.filter(v => typeof v === "number" && Number.isFinite(v)).slice(0, 100)
+    : [];
+
   return {
-    currentPrice:           { price: current, regularPrice: regular },
-    lowestPrice:             { priceInfo: { price: lowest } },
-    discountDaysOfLastYear:  e.dd ?? 0,
-    recentSalePriceLog:      e.lg ?? [],
+    currentPrice:            { price: current, regularPrice: regular },
+    lowestPrice:              { priceInfo: { price: lowest } },
+    discountDaysOfLastYear:   dd,
+    recentSalePriceLog:       lg,
   };
 }
 
@@ -249,10 +271,12 @@ async function _fetchFromGithub(rj, ttlMs) {
   if (!index || !(RJ in index)) return null; // 未収録のRJ
 
   const shardId = index[RJ];
-  const shard   = await _getGithubShard(shardId, ttlMs);
+  if (!Number.isInteger(shardId) || shardId < 0) return null; // index側の値が不正な場合は安全側に倒す
+
+  const shard = await _getGithubShard(shardId, ttlMs);
   if (!shard || !shard[RJ]) return null;
 
-  return _adaptShardEntry(shard[RJ]);
+  return _adaptShardEntry(shard[RJ]); // 不正な形のエントリなら内部で null を返す（呼び出し元は null を「未収録」と同様に扱う）
 }
 
 // ── 期限切れローカルキャッシュの定期クリーンアップ（ネットワークアクセスなし）──

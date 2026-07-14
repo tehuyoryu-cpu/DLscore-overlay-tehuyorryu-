@@ -443,6 +443,14 @@ function initPopup() {
       });
     }
 
+    // 傾向診断ページを開く
+    const tasteQuizBtn = document.getElementById("openTasteQuiz");
+    if (tasteQuizBtn) {
+      tasteQuizBtn.addEventListener("click", () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL("taste_quiz.html") });
+      });
+    }
+
     // RJ検索
     const searchEl = document.getElementById("compSearch");
     if (searchEl) {

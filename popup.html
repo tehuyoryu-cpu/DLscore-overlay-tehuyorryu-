@@ -341,6 +341,17 @@ body{
   </div>
   <div class="section-body" id="s-data">
     <div class="row">
+      <div style="flex:1"><div class="row-label">スコア更新頻度</div><div class="row-sub">共有DB(GitHub)からの再取得間隔。短いほど最新だが通信が増えます</div></div>
+      <div class="row-ctrl">
+        <select id="scoreTtl" class="txt-in">
+          <option value="6h">6時間</option>
+          <option value="1d">1日</option>
+          <option value="1w">1週間</option>
+          <option value="1m">1か月</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
       <div style="flex:1"><div class="row-label">スコアDBリセット</div><div class="row-sub">キャッシュを削除、次回アクセス時に再取得</div></div>
       <div class="row-ctrl"><button class="act-btn" id="clearScoreDb">🔢 リセット</button></div>
     </div>

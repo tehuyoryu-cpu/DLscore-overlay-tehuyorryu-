@@ -41,6 +41,7 @@
     labelRed:        "",
     useTextScore:    false,
     showSaleWarning: true,
+    translateTags:   false,
   };
 
   let settings = { ...DEFAULTS };
@@ -625,8 +626,44 @@
         try { resultCache.set(rj, calcScore(data, snap)); } catch {}
       }
     }
+    if ("translateTags" in changes) {
+      if (settings.translateTags) translateTags();
+      else removeTranslatedTags();
+    }
     applySettingsToRendered();
   });
+
+  // =====================
+  // タグ/ジャンル 英語対訳（tag_dict.js の TAG_EN / lookupTagEN を使用）
+  // processedTagEls は DOM ノードに紐づく WeakSet のため SPA 再描画時に
+  // 古いノードが GC されれば自動的にクリアされる（明示リセット不要）
+  // =====================
+  const TAG_SELECTOR =
+    "a[href*='genre_id'], a[href*='keyword_creater'], " +
+    ".main_genre a, .work_genre a, .search_tag a, #work_outline a[href*='genre']";
+  const processedTagEls = new WeakSet();
+
+  function translateTags() {
+    if (!settings.translateTags) return;
+    if (typeof lookupTagEN !== "function") return; // tag_dict.js 未ロード
+    document.querySelectorAll(TAG_SELECTOR).forEach(el => {
+      if (processedTagEls.has(el)) return;
+      processedTagEls.add(el);
+      const jp = el.textContent.trim();
+      const en = lookupTagEN(jp);
+      if (!en || en === jp) return;
+      const span = document.createElement("span");
+      span.dataset.dlscoreTagEn = "1";
+      span.style.cssText = "font-size:10px;color:#8899aa;margin-left:4px;";
+      span.textContent = `(${en})`;
+      el.insertAdjacentElement("afterend", span);
+    });
+  }
+
+  // 設定OFF時: 既に挿入した対訳スパンを一括除去
+  function removeTranslatedTags() {
+    document.querySelectorAll("[data-dlscore-tag-en]").forEach(el => el.remove());
+  }
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type !== "CLEAR_CACHE") return;
@@ -647,6 +684,7 @@
     document.querySelector("#dlscore-stats")?.remove();
     document.querySelectorAll("[data-dlscore-card]").forEach(el => el.remove());
     document.querySelectorAll("[data-dlscore-done]").forEach(el => { delete el.dataset.dlscoreDone; });
+    document.querySelectorAll("[data-dlscore-tag-en]").forEach(el => el.remove());
     runList();
     if (isDetail && mainRJ) fetchMainRJ();
   });
@@ -808,6 +846,7 @@
       if (rj === mainRJ) continue;
       scheduleCard(rj, cards);  // D項: IntersectionObserver lazy fetch
     }
+    translateTags();
   }
 
   let spaRunning     = false;
@@ -842,6 +881,7 @@
         document.querySelector("#dlscore-stats")?.remove();
         document.querySelectorAll("[data-dlscore-card]").forEach(el => el.remove());
         document.querySelectorAll("[data-dlscore-done]").forEach(el => { delete el.dataset.dlscoreDone; });
+        document.querySelectorAll("[data-dlscore-tag-en]").forEach(el => el.remove());
         fetchedRJs.clear();
         resultCache.clear();
         rawDataCache.clear();

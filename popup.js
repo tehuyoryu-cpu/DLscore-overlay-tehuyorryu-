@@ -41,6 +41,10 @@ const HELP_ITEMS = [
     a: "共有DB(GitHub)からスコアを再取得する間隔です。「データ管理」で 6時間/1日/1週間/1か月 から選択できます。短くすると最新の価格に追従しやすくなりますが、通信回数が増えます。",
   },
   {
+    q: "🌐 タグ英語対訳とは",
+    a: "ジャンル・タグの横に英語訳を薄く併記します。<code>tag_dict.js</code> の公式タグ辞書に登録がある語のみ対応。未対応語は無視されます。",
+  },
+  {
     q: "データはどこに保存される？",
     a: "設定・統計・総集編リストは <code>chrome.storage.local</code>。価格履歴は <code>localStorage</code>（上限300件）、スコアキャッシュは <code>IndexedDB</code>。外部送信はありません（共有スコアDB(GitHub raw)へのアクセスを除く）。",
   },
@@ -114,6 +118,7 @@ const DEFAULTS = {
   showSaleWarning: true,
   showCompBadge:   true,
   scoreTtlMs:      "6h", // background.js の TTL_OPTIONS のキー("6h"/"1d"/"1w"/"1m")と対応
+  translateTags:   false,
 };
 
 const STATS_KEY       = "dlsite_stats_v1";
@@ -477,7 +482,7 @@ function initPopup() {
       const yellowEl = document.getElementById("yellow");
       if (!greenEl || !yellowEl) return;
 
-      ["showOverlay", "showCards", "useTextScore", "showSaleWarning", "showCompBadge"].forEach(id => {
+      ["showOverlay", "showCards", "useTextScore", "showSaleWarning", "showCompBadge", "translateTags"].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.checked = s[id] ?? DEFAULTS[id];

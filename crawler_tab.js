@@ -3,6 +3,7 @@
 
 // ── 定数 ──
 const _COMP_KEY       = "dlsite_compilations_v1";   // 収録作品RJ（バッジ表示対象）
+const _COMP_PENDING_KEY = "dlsite_comp_pending_v1";  // 要確認候補（低信頼度の推定、人の承認待ち）
 const _COMP_WORKS_KEY = "dlsite_comp_works_v1";      // 総集編作品RJ（Phase Bの入力のみ）
 const _PROG_KEY       = "dlsite_comp_progress";
 const _PROCESSED_KEY  = "dlsite_processed_comps_v1";
@@ -189,12 +190,13 @@ function _extractDetailRJs(html, selfRJ) {
  */
 // ── 推定エンジン委譲（comp_analyzer.js の estimateContents を使用）──
 // RJ もリンクも書かないサークルへのフォールバック
+// 正確性優先: 高信頼度(high)は自動マーク、低信頼度(review)は要確認キューに回す。
 async function _estimateFromCircle(html, selfRJ) {
   try {
     return await estimateContents(selfRJ, html, _getText, _getJSON, _sleep, () => _running);
   } catch (e) {
     console.warn("[CompAnalyzer] 推定失敗:", selfRJ, String(e));
-    return [];
+    return { high: [], review: [] };
   }
 }
 
@@ -221,6 +223,30 @@ async function _mergeToCompKey(rjIterable) {
   const ex = await chrome.storage.local.get({[_COMP_KEY]:[]});
   const merged = [...new Set([...ex[_COMP_KEY], ...rjIterable])].sort();
   await chrome.storage.local.set({[_COMP_KEY]: merged});
+  return merged.length;
+}
+
+/**
+ * 要確認キューへのマージ。
+ * キーは rj+compRj のペア単位（同じ作品が複数の総集編候補になり得るため）。
+ * 既に _COMP_KEY（確定マーク済み）に入っている rj は積まない（承認待ちが無意味なため）。
+ * 同じペアが既にキューにあれば、スコアが高い方・reasonsが新しい方で上書きする。
+ */
+async function _mergeToPendingKey(entries) {
+  if (!entries || entries.length === 0) return 0;
+  const r = await chrome.storage.local.get({[_COMP_PENDING_KEY]:[], [_COMP_KEY]:[]});
+  const confirmedSet = new Set(r[_COMP_KEY]);
+  const map = new Map(r[_COMP_PENDING_KEY].map(e => [`${e.rj}::${e.compRj}`, e]));
+  for (const e of entries) {
+    if (confirmedSet.has(e.rj)) continue; // 既に確定済みなら確認不要
+    const key = `${e.rj}::${e.compRj}`;
+    const existing = map.get(key);
+    if (!existing || e.score > existing.score) {
+      map.set(key, { ...e, addedAt: existing?.addedAt ?? Date.now() });
+    }
+  }
+  const merged = [...map.values()].sort((a, b) => b.score - a.score);
+  await chrome.storage.local.set({[_COMP_PENDING_KEY]: merged});
   return merged.length;
 }
 async function _mergeToCompWorksKey(rjIterable) {
@@ -283,16 +309,19 @@ async function _phaseB() {
       try {
         const html = await _getText(_DLSITE_WORK(rj), _DETAIL_TO);
 
-        // 1. 作品内容から直接抽出（DOMParser + リンク）
+        // 1. 作品内容から直接抽出（DOMParser + リンク）— 確実な情報源なのでそのまま自動マーク
         contained = _extractDetailRJs(html, rj);
 
         // 2. 0件の場合: 同サークル作品からスコアリング推定
+        //    正確性優先: high(高信頼度)のみ自動マーク、review(低信頼度)は要確認キューへ
         if (contained.length === 0) {
-          contained = await _estimateFromCircle(html, rj);
+          const est = await _estimateFromCircle(html, rj);
+          contained = est.high;
+          if (est.review.length > 0) await _mergeToPendingKey(est.review);
         }
 
         newDone.push(rj);
-        // bug②修正: contained は この作品専用の RJ リスト
+        // bug②修正: contained は この作品専用の RJ リスト（自動マーク分のみ、要確認分は含まない）
         items.push({ url: _DLSITE_WORK(rj), rjAll: contained, savedAt: Date.now() });
 
       } catch {

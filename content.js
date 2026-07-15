@@ -42,6 +42,7 @@
     useTextScore:    false,
     showSaleWarning: true,
     translateTags:   false,
+    enableAffiliate: true,
   };
 
   let settings = { ...DEFAULTS };
@@ -630,6 +631,9 @@
       if (settings.translateTags) translateTags();
       else removeTranslatedTags();
     }
+    if ("enableAffiliate" in changes && settings.enableAffiliate) {
+      applyAffiliateLinks();
+    }
     applySettingsToRendered();
   });
 
@@ -736,6 +740,29 @@
       rjCards.get(rj).add(card);
     });
     return rjCards;
+  }
+
+  // ── アフィリエイトリンク自動置換 ──
+  // 作品詳細ページへの外部リンクを DLsite アフィリエイトリダイレクタへ書き換える。
+  // カート/体験版/購入リンクは対象外（SKIP_HREF_PATTERN で除外、機能破壊防止）。
+  const AFFILIATE_AID   = "SWSW457457";
+  const PRODUCT_LINK_RE = /\/(?:work\/=\/product_id\/)?(RJ\d{4,})\.html(?:[?#]|$)/i;
+
+  function affiliateUrl(rj) {
+    return `https://dlaf.jp/home/dlaf/=/t/n/link/work/aid/${AFFILIATE_AID}/id/${rj}.html`;
+  }
+
+  function applyAffiliateLinks() {
+    if (settings.enableAffiliate === false) return;
+    document.querySelectorAll("a[href]").forEach(a => {
+      if (a.dataset.dlscoreAff) return;
+      if (SKIP_HREF_PATTERN.test(a.href)) return;
+      const m = a.href.match(PRODUCT_LINK_RE);
+      if (!m) return;
+      a.dataset.dlscoreAff = "1";
+      a.href = affiliateUrl(m[1].toUpperCase());
+      a.rel  = a.rel && a.rel.includes("sponsored") ? a.rel : `${a.rel || ""} noopener sponsored`.trim();
+    });
   }
 
   // D項: IntersectionObserver によるlazy fetch
@@ -847,6 +874,7 @@
       scheduleCard(rj, cards);  // D項: IntersectionObserver lazy fetch
     }
     translateTags();
+    applyAffiliateLinks();
   }
 
   let spaRunning     = false;

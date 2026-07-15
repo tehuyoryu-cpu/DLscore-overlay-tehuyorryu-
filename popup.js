@@ -119,6 +119,7 @@ const DEFAULTS = {
   showCompBadge:   true,
   scoreTtlMs:      "6h", // background.js の TTL_OPTIONS のキー("6h"/"1d"/"1w"/"1m")と対応
   translateTags:   false,
+  enableAffiliate: true,
 };
 
 const STATS_KEY       = "dlsite_stats_v1";
@@ -482,7 +483,7 @@ function initPopup() {
       const yellowEl = document.getElementById("yellow");
       if (!greenEl || !yellowEl) return;
 
-      ["showOverlay", "showCards", "useTextScore", "showSaleWarning", "showCompBadge", "translateTags"].forEach(id => {
+      ["showOverlay", "showCards", "useTextScore", "showSaleWarning", "showCompBadge", "translateTags", "enableAffiliate"].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.checked = s[id] ?? DEFAULTS[id];

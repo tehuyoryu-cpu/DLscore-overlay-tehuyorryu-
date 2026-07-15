@@ -15,6 +15,7 @@
 【解決済み】
 
 ■ UI / 表示関係
+- アフィリエイトリンク自動置換 → 作品詳細ページ(RJxxxx.html)への外部リンクを dlaf.jp アフィリエイトリダイレクタへ書き換え。カート/体験版等は SKIP_HREF_PATTERN で除外し購入導線を保護。popupの「🔗 アフィリエイトリンク」トグルでON/OFF可能（デフォルトON）
 - Firefox、閾値の数値を変更するボタンが白くて浮く → -moz-appearance:textfield で統一
 - renderMain の \n が改行されない → alertSpan を別要素で管理
 - renderMain の border に初期色未指定 → border:2px solid #ccc で仮色を設定

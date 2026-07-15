@@ -187,6 +187,14 @@ function scoreCandidate(comp, cand) {
   else if(sim>=0.5&&titleScore<30) {titleScore+=30;why.push(`タイトル類似(${(sim*100).toFixed(0)}%)`);}
   score += Math.min(titleScore, 100);
 
+  // タイトル完全不一致 + イベント不明 → 早期除外（ガバガバ防止）
+  if (titleScore === 0) {
+    const ce2=comp.events.map(normalizeEvent).filter(Boolean);
+    const de2=normalizeEvent(cand.event||"");
+    const hasEventMatch = de2 && ce2.length && (ce2.includes(de2) || ce2.some(e=>e.includes(de2)||de2.includes(e)));
+    if (!hasEventMatch) return {rj:cand.rj, score:-1, reasons:["タイトル不一致・イベント不一致"], pageCount:cand.pageCount||0};
+  }
+
   // ── イベント一致 ──
   const ce=comp.events.map(normalizeEvent).filter(Boolean);
   const de=normalizeEvent(cand.event||"");
@@ -287,6 +295,7 @@ async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldCon
   const cn=normalizeTitle(comp.title);
   const ranked=[...titleMap.entries()]
     .map(([rj,title])=>({rj,title,prescore:ngramSim(cn,normalizeTitle(title))}))
+    .filter(x=>x.prescore>0.1||!x.title)  // 0.1未満は無関係とみなして除外
     .sort((a,b)=>b.prescore-a.prescore)
     .slice(0,MAX_API);
 

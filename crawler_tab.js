@@ -1,5 +1,8 @@
 // crawler_tab.js
-// 動作モード: "crawl"（保存済み状態から再開）/ "refresh"（スコア再取得のみ）
+// 動作モード: "crawl"（新規）/ "resume"（保存済み状態から再開）
+// ★方針転換: スコアデータの取得は background.js が GitHub raw 共有DBから行うため、
+//   ここでは総集編RJの検出(Phase A/B/C)のみを担当する（旧Phase D の dlwatcher.com
+//   直接クロールは廃止。関連する "refresh" モードも削除）。
 
 // ── 定数 ──
 const _COMP_KEY       = "dlsite_compilations_v1";   // 収録作品RJ（バッジ表示対象）
@@ -16,20 +19,16 @@ const _DLSITE_WORK = rj =>
 const _CIRCLE_URL  = (makerId, page = 1) =>
   `https://www.dlsite.com/maniax/fsr/=/sex_category%5B0%5D/male/maker_id/${makerId}/per_page/100/page/${page}/show_type/1`;
 const _DLDSHARE_BASE  = "https://dldshare.net/archives/tag/%E7%B7%8F%E9%9B%86%E7%B7%A8";
-const _DLWATCHER_BASE = "https://dlwatcher.com/product/";
 
 const _LIST_TO       = 12_000;
 const _DETAIL_TO     = 14_000;
-const _SCORE_TO      = 12_000;
+const _JSON_TO        = 12_000; // comp_analyzer.js の DLsite product-info API 呼び出し用タイムアウト
 const _LIST_DELAY    = 200;
 const _DETAIL_DELAY  = 450;
 const _CIRCLE_DELAY  = 500;  // サークル作品取得（DLsite に配慮）
 const _DLDS_DELAY    = 150;
-const _SCORE_DELAY   = 300;
 const _DETAIL_CONCUR = 3;
 const _DLDS_CONCUR   = 8;
-const _SCORE_CONCUR  = 4;
-const _SCORE_TTL     = 6 * 60 * 60 * 1000;
 const _SAVE_N        = 20;
 
 let _running = true;
@@ -62,18 +61,6 @@ async function _dbSaveItems(items) {
     items.forEach(i => tx.objectStore("items").put(i));
     await new Promise((r,j) => { tx.oncomplete=r; tx.onerror=j; }); } catch {}
 }
-async function _getScore(rj) {
-  try { const db = await _openDB();
-    return await new Promise(r => {
-      const req = db.transaction("scores","readonly").objectStore("scores").get(rj.toUpperCase());
-      req.onsuccess = () => r(req.result ?? null); req.onerror = () => r(null);
-    }); } catch { return null; }
-}
-async function _saveScores(entries) {
-  try { const db = await _openDB(); const tx = db.transaction("scores","readwrite");
-    entries.forEach(e => tx.objectStore("scores").put(e));
-    await new Promise((r,j) => { tx.oncomplete=r; tx.onerror=j; }); } catch {}
-}
 
 // ════════════════════════════════
 // 再開ステート
@@ -95,7 +82,7 @@ async function _getText(url, to=_LIST_TO) {
   finally { clearTimeout(t); }
 }
 async function _getJSON(url) {
-  const c=new AbortController(); const t=setTimeout(()=>c.abort(),_SCORE_TO);
+  const c=new AbortController(); const t=setTimeout(()=>c.abort(),_JSON_TO);
   try { const r=await fetch(url,{signal:c.signal}); if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }
   finally { clearTimeout(t); }
 }
@@ -408,40 +395,6 @@ async function _phaseC(S) {
 }
 
 // ════════════════════════════════
-// Phase D: dlwatcher スコア取得
-// ════════════════════════════════
-async function _phaseD(rjList, base={}) {
-  const now=Date.now(), toFetch=[];
-  for (const rj of rjList) {
-    if (!_running) break;
-    const c = await _getScore(rj);
-    if (!c || now-c.fetchedAt>_SCORE_TTL) toFetch.push(rj);
-  }
-  if (toFetch.length===0) { await _prog({...base, phase:"スコア最新（更新不要）", score:rjList.length}); return; }
-
-  const total=toFetch.length; let fetched=0,saved=0,idx=0; const batch=[];
-  await _prog({...base, running:true, phase:"スコア取得中", fetched:0, total, score:0});
-
-  async function worker() {
-    while (_running) {
-      const i=idx++; if (i>=toFetch.length) break;
-      const rj=toFetch[i];
-      try {
-        const data=await _getJSON(`${_DLWATCHER_BASE}${rj}.json`);
-        batch.push({rj:rj.toUpperCase(), data, fetchedAt:Date.now()}); saved++;
-        if (batch.length>=50) await _saveScores(batch.splice(0,batch.length));
-      } catch {}
-      fetched++;
-      if (fetched%10===0) await _prog({...base, running:true, phase:"スコア取得中", fetched, total, score:saved});
-      await _sleep(_SCORE_DELAY);
-    }
-  }
-  await Promise.all(Array.from({length:_SCORE_CONCUR}, worker));
-  if (batch.length>0) await _saveScores(batch);
-  await _prog({...base, running:true, phase:"スコア保存完了", fetched:total, total, score:saved});
-}
-
-// ════════════════════════════════
 // メインクロール
 // ════════════════════════════════
 async function _crawl() {
@@ -454,8 +407,6 @@ async function _crawl() {
     await _phaseA(S); if (!_running) { stopped(); return; }
     await _phaseB();  if (!_running) { stopped(); return; }
     await _phaseC(S); if (!_running) { stopped(); return; }
-    const fin = await chrome.storage.local.get({[_COMP_KEY]:[]});
-    await _phaseD(fin[_COMP_KEY], {running:true, rj:fin[_COMP_KEY].length});
     await _clearState();
     const done = await chrome.storage.local.get({[_COMP_KEY]:[]});
     await chrome.storage.local.set({[_PROG_KEY]:{running:false, phase:"完了", rj:done[_COMP_KEY].length}});
@@ -466,25 +417,9 @@ async function _crawl() {
   }
 }
 
-async function _refreshScores() {
-  try {
-    const r = await chrome.storage.local.get({[_COMP_KEY]:[]});
-    if (!r[_COMP_KEY].length) {
-      await chrome.storage.local.set({[_PROG_KEY]:{running:false, phase:"更新対象なし"}}); return;
-    }
-    await _prog({running:true, phase:"スコア更新開始", rj:r[_COMP_KEY].length, score:0});
-    await _phaseD(r[_COMP_KEY], {running:true, rj:r[_COMP_KEY].length});
-    await chrome.storage.local.set({[_PROG_KEY]:{running:false, phase:"スコア更新完了", rj:r[_COMP_KEY].length}});
-    chrome.runtime.sendMessage({type:"CRAWLER_DONE"});
-  } catch(e) {
-    await chrome.storage.local.set({[_PROG_KEY]:{running:false, phase:`エラー: ${e.message}`}});
-    chrome.runtime.sendMessage({type:"CRAWLER_DONE"});
-  }
-}
-
 (async () => {
-  const res  = await chrome.storage.local.get({dlsite_crawler_mode:"crawl"});
-  const mode = res.dlsite_crawler_mode;
+  const res = await chrome.storage.local.get({ dlsite_crawler_mode: "crawl" });
   await chrome.storage.local.remove("dlsite_crawler_mode");
-  if (mode==="refresh") await _refreshScores(); else await _crawl();
+  void res.dlsite_crawler_mode; // "crawl"/"resume" どちらも _loadState() 経由の状態継続で吸収される
+  await _crawl();
 })().finally(() => setTimeout(() => window.close(), 1500));

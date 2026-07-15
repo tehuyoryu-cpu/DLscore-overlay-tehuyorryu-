@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>傾向診断（β） — DLsite Score</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Mono:wght@400;500&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#080810; --s1:#0f0f1a; --s2:#141422; --s3:#1a1a2e;
+  --bd:#1e1e32; --bd2:#262640;
+  --ac:#7c6dfa; --ac2:#b8adff; --ac-glow:rgba(124,109,250,.18); --ac-faint:rgba(124,109,250,.07);
+  --txt:#c8c8e8; --txt2:#8888aa; --txt3:#50507a;
+  --mono:'DM Mono',monospace; --head:'Syne',system-ui,sans-serif; --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+body{
+  background:var(--bg); color:var(--txt); font-family:var(--sans);
+  max-width:720px; margin:0 auto; padding:28px 20px 60px;
+}
+h1{
+  font-family:var(--head); font-weight:800; font-size:22px; color:#fff;
+  letter-spacing:.02em; margin-bottom:4px;
+}
+.sub{ font-family:var(--mono); font-size:11px; color:var(--txt3); letter-spacing:.08em; margin-bottom:24px; }
+
+.disclaimer{
+  background:var(--s1); border:1px solid var(--bd); border-radius:10px;
+  padding:12px 14px; font-size:12px; color:var(--txt2); line-height:1.7; margin-bottom:24px;
+}
+
+.q-card{
+  background:var(--s1); border:1px solid var(--bd); border-radius:12px;
+  padding:16px 18px; margin-bottom:14px;
+}
+.q-num{ font-family:var(--mono); font-size:10px; color:var(--ac2); letter-spacing:.1em; margin-bottom:6px; }
+.q-text{ font-size:14px; color:#fff; font-weight:600; margin-bottom:12px; line-height:1.5; }
+.opt-list{ display:flex; flex-direction:column; gap:6px; }
+.opt{
+  display:flex; align-items:center; gap:10px;
+  border:1px solid var(--bd2); border-radius:8px; padding:9px 12px;
+  cursor:pointer; transition:border-color .15s, background .15s;
+  font-size:13px;
+}
+.opt:hover{ border-color:var(--ac); background:var(--ac-faint); }
+.opt.sel{ border-color:var(--ac); background:var(--ac-faint); color:#fff; }
+.opt input{ accent-color:var(--ac); }
+
+.progress-bar{
+  position:sticky; top:0; height:4px; background:var(--s3); border-radius:2px;
+  margin-bottom:20px; overflow:hidden; z-index:5;
+}
+.progress-fill{ height:100%; background:linear-gradient(90deg,var(--ac),var(--ac2)); width:0%; transition:width .25s; }
+
+.submit-btn{
+  display:block; width:100%; margin-top:8px; padding:13px;
+  background:linear-gradient(135deg,#9c8dff,#5c4dda); border:none; border-radius:10px;
+  color:#fff; font-family:var(--head); font-weight:700; font-size:14px; letter-spacing:.04em;
+  cursor:pointer; box-shadow:0 4px 16px rgba(124,109,250,.35);
+}
+.submit-btn:disabled{ opacity:.35; cursor:default; box-shadow:none; }
+.submit-btn:not(:disabled):hover{ filter:brightness(1.08); }
+
+/* ── 結果 ── */
+#result{ display:none; }
+.result-head{ text-align:center; padding:20px 0 8px; }
+.result-type{
+  font-family:var(--head); font-weight:800; font-size:26px;
+  background:linear-gradient(135deg,var(--ac2),var(--ac));
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+  margin-bottom:8px;
+}
+.result-desc{ font-size:13px; color:var(--txt2); line-height:1.8; max-width:520px; margin:0 auto; }
+
+.bars{ margin:26px 0; display:flex; flex-direction:column; gap:12px; }
+.bar-row{ display:flex; align-items:center; gap:10px; }
+.bar-label{ width:110px; flex-shrink:0; font-size:12px; color:var(--txt2); text-align:right; }
+.bar-track{ flex:1; height:10px; background:var(--s3); border-radius:5px; overflow:hidden; }
+.bar-fill{ height:100%; border-radius:5px; background:linear-gradient(90deg,var(--ac),var(--ac2)); transition:width .6s cubic-bezier(.4,0,.2,1); width:0%; }
+.bar-pct{ width:38px; font-family:var(--mono); font-size:11px; color:var(--txt3); text-align:right; }
+
+.tags-title{ font-family:var(--head); font-size:13px; font-weight:700; color:#fff; margin:22px 0 10px; }
+.tags{ display:flex; flex-wrap:wrap; gap:8px; }
+.tag-pill{
+  display:inline-flex; align-items:center; gap:5px;
+  background:var(--s2); border:1px solid var(--bd2); border-radius:20px;
+  padding:6px 13px; font-size:12px; color:var(--ac2); text-decoration:none;
+  transition:border-color .15s, background .15s;
+}
+.tag-pill:hover{ border-color:var(--ac); background:var(--ac-faint); }
+
+.retry-btn{
+  margin-top:26px; background:none; border:1px solid var(--bd2); color:var(--txt2);
+  border-radius:8px; padding:9px 16px; font-size:12px; cursor:pointer;
+}
+.retry-btn:hover{ border-color:var(--txt2); color:#fff; }
+
+.footnote{ margin-top:30px; font-size:11px; color:var(--txt3); line-height:1.7; border-top:1px solid var(--bd); padding-top:14px; }
+</style>
+</head>
+<body>
+
+<h1>🧭 傾向診断（β）</h1>
+<div class="sub">CASUAL PREFERENCE QUIZ</div>
+
+<div class="disclaimer">
+  遊び感覚の簡易診断です。恋愛・親密さのスタイルに関する質問へ答えると、傾向を6軸のグラフとタイプ名で表示し、関連しそうなDLsiteのタグ検索リンクを出します。
+  科学的根拠に基づく性格診断ではありません。結果はこの端末内でのみ処理され、外部送信は行われません。
+</div>
+
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+
+<form id="quizForm"></form>
+<button class="submit-btn" id="submitBtn" disabled>診断する</button>
+
+<div id="result">
+  <div class="result-head">
+    <div class="result-type" id="resultType"></div>
+    <div class="result-desc" id="resultDesc"></div>
+  </div>
+
+  <div class="bars" id="resultBars"></div>
+
+  <div class="tags-title">気になるかもしれないタグ（DLsiteで検索）</div>
+  <div class="tags" id="resultTags"></div>
+
+  <button class="retry-btn" id="retryBtn">🔁 もう一度診断する</button>
+</div>
+
+<div class="footnote">
+  ローカルで完結する簡易ツールです。診断結果は正確性を保証するものではなく、あくまで参考・エンタメ用途としてご利用ください。
+</div>
+
+<script src="taste_quiz.js"></script>
+</body>
+</html>

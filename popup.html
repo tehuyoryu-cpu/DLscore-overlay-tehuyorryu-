@@ -30,6 +30,7 @@ body{
   background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:12px;
   width:320px;min-width:320px;max-width:320px;
   overflow-x:hidden;overflow-y:auto;max-height:600px;scrollbar-gutter:stable;
+  opacity:0;transition:opacity .1s ease; /* G項: FOUC防止 */
 }
 
 .hd{
@@ -292,6 +293,8 @@ body{
     <div class="row"><span class="row-icon">🃏</span><span class="row-label">カードスコア</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showCards" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
     <div class="row"><span class="row-icon">🔤</span><span class="row-label">文字スコア（良/可/不）</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="useTextScore"><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
     <div class="row"><span class="row-icon">⚠️</span><span class="row-label">定期セール警告</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="showSaleWarning" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
+    <div class="row"><span class="row-icon">🌐</span><span class="row-label">タグ英語対訳</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="translateTags"><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
+    <div class="row"><span class="row-icon">🔗</span><span class="row-label">アフィリエイトリンク</span><div class="row-ctrl"><label class="toggle"><input type="checkbox" id="enableAffiliate" checked><div class="toggle-track"><div class="toggle-thumb"></div></div></label></div></div>
     <div class="row">
       <div style="flex:1"><div class="row-label">このスコア未満を薄く</div><div class="row-sub">0 = 無効</div></div>
       <div class="row-ctrl"><input class="num-in" type="number" id="dimBelow" min="0" max="100" value="0" inputmode="numeric"></div>
@@ -386,6 +389,17 @@ body{
   </div>
   <div class="section-body" id="s-data">
     <div class="row">
+      <div style="flex:1"><div class="row-label">スコア更新頻度</div><div class="row-sub">共有DB(GitHub)からの再取得間隔。短いほど最新だが通信が増えます</div></div>
+      <div class="row-ctrl">
+        <select id="scoreTtl" class="txt-in">
+          <option value="6h">6時間</option>
+          <option value="1d">1日</option>
+          <option value="1w">1週間</option>
+          <option value="1m">1か月</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
       <div style="flex:1"><div class="row-label">スコアDBリセット</div><div class="row-sub">キャッシュを削除、次回アクセス時に再取得</div></div>
       <div class="row-ctrl"><button class="act-btn" id="clearScoreDb">🔢 リセット</button></div>
     </div>
@@ -398,6 +412,7 @@ body{
 
 <div class="footer">
   <button class="act-btn" id="openAnalytics" style="font-size:10px;padding:3px 10px">📊 分析</button>
+  <button class="act-btn" id="openTasteQuiz" style="font-size:10px;padding:3px 10px">🧭 傾向診断</button>
   <span style="flex:1"></span>
   <button class="cache-clear" id="cacheClear">キャッシュ削除</button>
 </div>

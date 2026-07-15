@@ -14,7 +14,7 @@ function initAccordion() {
 const HELP_ITEMS = [
   {
     q: "スコアが表示されない",
-    a: "①ページをリロード ②ポップアップ右下「キャッシュ削除」を押す（TTL 30分）。dlwatcher.com にデータがない作品はスコアを取得できません。",
+    a: "①ページをリロード ②ポップアップ右下「キャッシュ削除」を押す（表示キャッシュ、TTL 30分）③それでも直らない場合は「データ管理」の「🔢 リセット」でスコアDB自体を再取得。共有DB(GitHub)に未収録の作品はスコアを取得できません。",
   },
   {
     q: "スコアのしくみ",
@@ -37,8 +37,16 @@ const HELP_ITEMS = [
     a: "年間セール日数が90日以上の作品に表示される衝動買い抑止マーク。ポップアップの「⚠️ 定期セール警告」トグルでOFFにできます。",
   },
   {
+    q: "スコア更新頻度とは",
+    a: "共有DB(GitHub)からスコアを再取得する間隔です。「データ管理」で 6時間/1日/1週間/1か月 から選択できます。短くすると最新の価格に追従しやすくなりますが、通信回数が増えます。",
+  },
+  {
+    q: "🌐 タグ英語対訳とは",
+    a: "ジャンル・タグの横に英語訳を薄く併記します。<code>tag_dict.js</code> の公式タグ辞書に登録がある語のみ対応。未対応語は無視されます。",
+  },
+  {
     q: "データはどこに保存される？",
-    a: "設定・統計・総集編リストは <code>chrome.storage.local</code>。価格履歴・スコアキャッシュは <code>localStorage</code>（上限300件）。外部送信はありません（dlwatcher.com へのAPIリクエストを除く）。",
+    a: "設定・統計・総集編リストは <code>chrome.storage.local</code>。価格履歴は <code>localStorage</code>（上限300件）、スコアキャッシュは <code>IndexedDB</code>。外部送信はありません（共有スコアDB(GitHub raw)へのアクセスを除く）。",
   },
 ];
 
@@ -109,6 +117,9 @@ const DEFAULTS = {
   useTextScore:    false,
   showSaleWarning: true,
   showCompBadge:   true,
+  scoreTtlMs:      "6h", // background.js の TTL_OPTIONS のキー("6h"/"1d"/"1w"/"1m")と対応
+  translateTags:   false,
+  enableAffiliate: true,
 };
 
 const STATS_KEY       = "dlsite_stats_v1";
@@ -557,6 +568,14 @@ function initPopup() {
       });
     }
 
+    // 傾向診断ページを開く
+    const tasteQuizBtn = document.getElementById("openTasteQuiz");
+    if (tasteQuizBtn) {
+      tasteQuizBtn.addEventListener("click", () => {
+        chrome.tabs.create({ url: chrome.runtime.getURL("taste_quiz.html") });
+      });
+    }
+
     // RJ検索
     const searchEl = document.getElementById("compSearch");
     if (searchEl) {
@@ -570,6 +589,9 @@ function initPopup() {
   }
 
   chrome.storage.local.get(DEFAULTS, (s) => {
+    // G項: hydration — ストレージ読み込み完了後にUIを表示（未初期化状態の一瞬を隠す）
+    document.body.style.opacity = "1";
+
     if (chrome.runtime.lastError) {
       console.warn("[DLscore popup] storage error:", chrome.runtime.lastError.message);
       s = { ...DEFAULTS };
@@ -580,7 +602,7 @@ function initPopup() {
       const yellowEl = document.getElementById("yellow");
       if (!greenEl || !yellowEl) return;
 
-      ["showOverlay", "showCards", "useTextScore", "showSaleWarning", "showCompBadge"].forEach(id => {
+      ["showOverlay", "showCards", "useTextScore", "showSaleWarning", "showCompBadge", "translateTags", "enableAffiliate"].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.checked = s[id] ?? DEFAULTS[id];
@@ -588,6 +610,14 @@ function initPopup() {
           save({ [id]: this.checked });
         });
       });
+
+      const scoreTtlEl = document.getElementById("scoreTtl");
+      if (scoreTtlEl) {
+        scoreTtlEl.value = s.scoreTtlMs || DEFAULTS.scoreTtlMs;
+        scoreTtlEl.addEventListener("change", function () {
+          save({ scoreTtlMs: this.value });
+        });
+      }
 
       greenEl.value  = s.green;
       yellowEl.value = s.yellow;
@@ -667,3 +697,6 @@ if (document.readyState === "loading") {
   initHelp();
   initPopup();
 }
+
+// G項: ストレージ読み込みが長引いた場合のフォールバック表示（300ms上限）
+setTimeout(() => { document.body.style.opacity = "1"; }, 300);

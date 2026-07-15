@@ -1,6 +1,15 @@
 // background.js
 // クローラーロジックは crawler_tab.js（専用タブ）に移管済み。
 // ここではタブの開閉管理・AI レビュー・FETCH メッセージのみを担う。
+//
+// ★スコアデータは拡張側では取得しない方針。
+//   共有DBは tehuyoryu-cpu/siteruns23432 の data ブランチ（別プロジェクト。PC側の
+//   デスクトップアプリが自前でDLsiteを巡回して収集した価格データから
+//   crawler/exportShards.js が manifest.json / index/NN.json / shards/NNNN.json を
+//   生成し、1日1回 push する）。
+//   拡張はそれを raw.githubusercontent.com 経由で manifest→index→shard の順に「拾うだけ」
+//   （dlwatcher.com への直接アクセスは廃止）。
+//   ローカルキャッシュ(IndexedDB)の有効期限は popup で 6時間/1日/1週間/1か月 から選択可能。
 
 // ── keepalive（MV3 サービスワーカーのスリープ防止）──
 setInterval(() => {
@@ -12,30 +21,82 @@ const _PROG_KEY        = "dlsite_comp_progress";
 const _COMP_KEY        = "dlsite_compilations_v1";
 const _COMP_PENDING_KEY = "dlsite_comp_pending_v1";
 const FETCH_TIMEOUT_MS = 15_000;
-const _SCORE_TTL       = 6 * 60 * 60 * 1000;
-const _REFRESH_ALARM   = "dlscore_score_refresh";
+
+// ── スコアキャッシュTTL（popup の「スコア更新頻度」設定から取得。未設定時は6時間）──
+const TTL_KEY = "scoreTtlMs";
+const TTL_OPTIONS = {
+  "6h": 6  * 60 * 60 * 1000,
+  "1d": 24 * 60 * 60 * 1000,
+  "1w": 7  * 24 * 60 * 60 * 1000,
+  "1m": 30 * 24 * 60 * 60 * 1000,
+};
+const DEFAULT_TTL_OPTION = "6h";
+
+async function _getScoreTtlMs() {
+  try {
+    const res = await chrome.storage.local.get({ [TTL_KEY]: DEFAULT_TTL_OPTION });
+    return TTL_OPTIONS[res[TTL_KEY]] ?? TTL_OPTIONS[DEFAULT_TTL_OPTION];
+  } catch {
+    return TTL_OPTIONS[DEFAULT_TTL_OPTION];
+  }
+}
+
+// ── GitHub raw（共有スコアDB）設定 ──
+// 実データ配信元: tehuyoryu-cpu/siteruns23432 の data ブランチ。
+// 実際の manifest.json を確認済み。ファイル構成は固定のハッシュ規則で決まり、
+// manifest自体にはパステンプレートは含まれない(shardCount等の件数のみ):
+//   manifest.json = { dataShards: 1024, idxShards: 64, hashAlgo: "fnv1a-32", ... }
+//   index/{idxId 2桁0埋め}.json  = { "RJ01234567": <dataShard番号>, ... }
+//     idxId = fnv1a(RJコード) % idxShards  ← RJコード自体でハッシュ分散
+//   shards/{shardId 4桁0埋め}.json = { "RJ01234567": {p,s,d,os,po,dd,lp,lg}, ... }
+//     shardId = fnv1a(maker_id) % dataShards ← サークル単位でハッシュ分散(index側から取得するので拡張側での計算は不要)
+// shard内のキーは圧縮スキーマ(p=定価/s=セール価格/d=割引率/os=セール中/po=ポイントのみ/
+// dd=年間セール日数/lp=過去最安値/lg=直近価格ログ)。content.js は dlwatcher.com 互換の
+// 入れ子形式(currentPrice/lowestPrice/discountDaysOfLastYear/recentSalePriceLog)を前提に
+// 書かれているため、_adaptShardEntry() でその場で変換して渡す(content.js側は無改修)。
+const _GITHUB_OWNER      = "tehuyoryu-cpu";
+const _GITHUB_REPO       = "siteruns23432";
+const _GITHUB_BRANCH     = "data";
+const _GITHUB_RAW_BASE   = `https://raw.githubusercontent.com/${_GITHUB_OWNER}/${_GITHUB_REPO}/${_GITHUB_BRANCH}/`;
+const _GITHUB_TIMEOUT_MS = 8_000;
+const _GH_META_TTL       = 60 * 60 * 1000; // manifest/index のローカルキャッシュ期間（1時間）
+const _DEFAULT_DATA_SHARDS = 1024;
+const _DEFAULT_IDX_SHARDS  = 64;
+
+// FNV-1a 32bit。crawler/exportShards.js の fnv1a() と完全に同じ実装(同じ結果を返す必要がある)。
+function _fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
 
 // ── bug③修正: SW 再起動時に残留「走査中」フラグをクリア ──
-// _crawlerTabId は再起動で null にリセットされるが storage の running フラグは残る
 chrome.storage.local.get({ [_PROG_KEY]: null }, (res) => {
   if (res[_PROG_KEY]?.running) {
     chrome.storage.local.set({ [_PROG_KEY]: { running: false, phase: "停止（再開可能）" } });
   }
 });
 
-// ── IndexedDB（crawler_tab.js と同じ DB・v2）──
+// ── IndexedDB（crawler_tab.js と同じ DB。ローカルキャッシュ + GitHub shard キャッシュ）──
+// v3: ghShards ストアを追加（GitHub raw の shard-N.json をキャッシュする用途）。
+// crawler_tab.js 側は v2 のまま open しても問題ない（既存より低いバージョンは無視される）。
 let _idb = null;
 
 function _openDB() {
   if (_idb) return Promise.resolve(_idb);
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("rj_crawler_db", 2);
+    const req = indexedDB.open("rj_crawler_db", 3);
     req.onupgradeneeded = () => {
       const d = req.result;
       if (!d.objectStoreNames.contains("items"))
         d.createObjectStore("items", { keyPath: "url" });
       if (!d.objectStoreNames.contains("scores"))
         d.createObjectStore("scores", { keyPath: "rj" });
+      if (!d.objectStoreNames.contains("ghShards"))
+        d.createObjectStore("ghShards", { keyPath: "shard" });
     };
     req.onsuccess = () => { _idb = req.result; resolve(_idb); };
     req.onerror   = () => reject(req.error);
@@ -63,38 +124,195 @@ async function _saveScore(rj, data) {
   } catch {}
 }
 
-// ── 定期スコア更新アラーム（6時間ごと）──
-chrome.alarms.create(_REFRESH_ALARM, {
-  delayInMinutes:  60,   // 初回は起動1時間後
-  periodInMinutes: 360,  // 以降6時間ごと
-});
+// ── 汎用: タイムアウト付き fetch → JSON（失敗時は null）──
+// セキュリティ強化: Content-Length が異常に大きいレスポンスは事前に弾く
+// (共有DBリポジトリが乗っ取られた場合の帯域/メモリDoSへの防御)。
+const _GH_MAX_BYTES = 4 * 1024 * 1024; // 4MB（shard/indexファイルとして十分すぎる余裕）
 
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== _REFRESH_ALARM) return;
-  if (_crawlerTabId !== null) return; // 既に走査中なら skip
+async function _fetchJSON(url) {
+  const controller = new AbortController();
+  const timer      = setTimeout(() => controller.abort(), _GITHUB_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
+    if (!res.ok) return null;
+    const cl = res.headers.get("content-length");
+    if (cl && Number(cl) > _GH_MAX_BYTES) {
+      console.warn("[DLscore] GitHub raw response too large, skipping:", url, cl);
+      return null;
+    }
+    return await res.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-  chrome.storage.local.get({ [_COMP_KEY]: [] }, (res) => {
-    if (chrome.runtime.lastError || (res[_COMP_KEY] || []).length === 0) return;
-    // 更新モードでタブを開く
-    chrome.storage.local.set({ dlsite_crawler_mode: "refresh" }, () => {
-      chrome.tabs.create(
-        { url: chrome.runtime.getURL("crawler_tab.html"), active: false },
-        (tab) => {
-          if (chrome.runtime.lastError) {
-            chrome.storage.local.remove("dlsite_crawler_mode");
-            return;
-          }
-          _crawlerTabId = tab.id;
-        }
-      );
-    });
+// ── chrome.storage.local ラッパー（manifest/index の軽量キャッシュ用）──
+function _storageGet(key) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ [key]: null }, (res) => resolve(chrome.runtime.lastError ? null : res[key]));
   });
+}
+function _storageSet(key, value) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ [key]: value }, () => resolve(!chrome.runtime.lastError));
+  });
+}
+
+// ── shard キャッシュ（IndexedDB。ファイル自体がそこそこ大きいため storage.local ではなくこちら）──
+async function _getShardCache(shardNo) {
+  try {
+    const db = await _openDB();
+    return await new Promise((resolve) => {
+      const req = db.transaction("ghShards", "readonly").objectStore("ghShards").get(shardNo);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror   = () => resolve(null);
+    });
+  } catch { return null; }
+}
+async function _saveShardCache(shardNo, data) {
+  try {
+    const db = await _openDB();
+    const tx = db.transaction("ghShards", "readwrite");
+    tx.objectStore("ghShards").put({ shard: shardNo, data, fetchedAt: Date.now() });
+    await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
+  } catch {}
+}
+
+// ── manifest.json 取得（1時間キャッシュ、取得失敗時は古いキャッシュにフォールバック）──
+async function _getGithubManifest() {
+  const cached = await _storageGet("_ghManifestCache");
+  if (cached && Date.now() - cached.fetchedAt < _GH_META_TTL) return cached.data;
+
+  const data = await _fetchJSON(`${_GITHUB_RAW_BASE}manifest.json`);
+  if (data) {
+    await _storageSet("_ghManifestCache", { data, fetchedAt: Date.now() });
+    return data;
+  }
+  return cached?.data ?? null; // 取得失敗時は期限切れでも古いキャッシュを使う
+}
+
+// ── index/{NN}.json 取得（RJ→dataShard番号 のマップ。RJコード自体でハッシュ分散済み）──
+// 1キー(_ghIndexCache)の中に idxId ごとのキャッシュをネストして持たせる
+// (storage.localのキー数を増やさず、CLEAR_SCORE_DB/CLEAR_ALL_DATA でも1回のremoveで済む)。
+async function _getGithubIndex(manifest, rj) {
+  const rawIdxShards = manifest.idxShards;
+  const idxShards = (Number.isInteger(rawIdxShards) && rawIdxShards > 0)
+    ? rawIdxShards
+    : _DEFAULT_IDX_SHARDS; // manifestの値が不正(型崩れ/0/負数)なら既定値にフォールバック
+  const idxId   = _fnv1a(rj) % idxShards;
+  const idxPath = `index/${String(idxId).padStart(2, "0")}.json`;
+
+  const all    = (await _storageGet("_ghIndexCache")) || {};
+  const cached = all[idxId];
+  if (cached && Date.now() - cached.fetchedAt < _GH_META_TTL) return cached.data;
+
+  const data = await _fetchJSON(`${_GITHUB_RAW_BASE}${idxPath}`);
+  if (data) {
+    all[idxId] = { data, fetchedAt: Date.now() };
+    await _storageSet("_ghIndexCache", all);
+    return data;
+  }
+  return cached?.data ?? null;
+}
+
+// ── shards/{NNNN}.json 取得（該当shardのみダウンロード。TTLは popup 設定に従う）──
+// shard番号は index 側から既に得られているため、ここでの再ハッシュは不要。
+async function _getGithubShard(shardId, ttlMs) {
+  const cached = await _getShardCache(shardId);
+  if (cached && Date.now() - cached.fetchedAt < ttlMs) return cached.data;
+
+  const path = `shards/${String(shardId).padStart(4, "0")}.json`;
+  const data = await _fetchJSON(`${_GITHUB_RAW_BASE}${path}`);
+  if (data) {
+    await _saveShardCache(shardId, data);
+    return data;
+  }
+  return cached?.data ?? null;
+}
+
+// ── shard内の圧縮スキーマ → content.js が期待する dlwatcher互換の入れ子形式に変換 ──
+// content.js の calcScore()/checkPriceAlert() はそれぞれ
+//   data.currentPrice.price / data.currentPrice.regularPrice
+//   data.lowestPrice.priceInfo.price
+//   data.discountDaysOfLastYear
+//   data.recentSalePriceLog
+// を参照する前提で書かれているため、ここで変換して content.js 側は無改修のまま動かす。
+function _adaptShardEntry(e) {
+  if (!e || typeof e !== "object") return null;
+
+  const toNum = (v, fallback) => (typeof v === "number" && Number.isFinite(v)) ? v : fallback;
+
+  const regular = toNum(e.p, 0);
+  const current = toNum(e.s, regular);
+  const lowest  = toNum(e.lp, regular);
+  const dd      = Math.max(0, Math.min(365, toNum(e.dd, 0)));
+  // 配列でない/巨大な配列は無視（共有DBが乗っ取られた場合のメモリDoS対策として長さも制限）
+  const lg = Array.isArray(e.lg)
+    ? e.lg.filter(v => typeof v === "number" && Number.isFinite(v)).slice(0, 100)
+    : [];
+
+  return {
+    currentPrice:            { price: current, regularPrice: regular },
+    lowestPrice:              { priceInfo: { price: lowest } },
+    discountDaysOfLastYear:   dd,
+    recentSalePriceLog:       lg,
+  };
+}
+
+// ── GitHub raw（manifest → index → shard）から該当RJのスコアデータを取得 ──
+async function _fetchFromGithub(rj, ttlMs) {
+  const RJ = rj.toUpperCase();
+
+  const manifest = await _getGithubManifest();
+  if (!manifest) return null;
+
+  const index = await _getGithubIndex(manifest, RJ);
+  if (!index || !(RJ in index)) return null; // 未収録のRJ
+
+  const shardId = index[RJ];
+  if (!Number.isInteger(shardId) || shardId < 0) return null; // index側の値が不正な場合は安全側に倒す
+
+  const shard = await _getGithubShard(shardId, ttlMs);
+  if (!shard || !shard[RJ]) return null;
+
+  return _adaptShardEntry(shard[RJ]); // 不正な形のエントリなら内部で null を返す（呼び出し元は null を「未収録」と同様に扱う）
+}
+
+// ── 期限切れローカルキャッシュの定期クリーンアップ（ネットワークアクセスなし）──
+const _CLEANUP_ALARM = "dlscore_cache_cleanup";
+chrome.alarms.create(_CLEANUP_ALARM, { delayInMinutes: 30, periodInMinutes: 360 });
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== _CLEANUP_ALARM) return;
+  try {
+    const ttl = await _getScoreTtlMs();
+    const db  = await _openDB();
+    const now = Date.now();
+
+    const tx  = db.transaction(["scores", "ghShards"], "readwrite");
+    const scoresReq = tx.objectStore("scores").openCursor();
+    scoresReq.onsuccess = () => {
+      const cursor = scoresReq.result;
+      if (!cursor) return;
+      if (now - (cursor.value?.fetchedAt ?? 0) > ttl) cursor.delete();
+      cursor.continue();
+    };
+    const shardReq = tx.objectStore("ghShards").openCursor();
+    shardReq.onsuccess = () => {
+      const cursor = shardReq.result;
+      if (!cursor) return;
+      if (now - (cursor.value?.fetchedAt ?? 0) > ttl) cursor.delete();
+      cursor.continue();
+    };
+    await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
+  } catch {}
 });
 
-// ── クローラータブ管理 ──
+// ── クローラータブ管理（総集編マーク機能。スコア取得とは無関係）──
 let _crawlerTabId = null;
 
-// タブが手動で閉じられた場合も確実に状態をリセット
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId !== _crawlerTabId) return;
   _crawlerTabId = null;
@@ -114,7 +332,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: false, reason: "already_running" });
       return;
     }
-    // popup から受け取った mode（"crawl" / "resume"）を storage 経由でタブに渡す
     const mode = msg.mode === "resume" ? "resume" : "crawl";
     chrome.storage.local.set({ dlsite_crawler_mode: mode }, () => {
       chrome.tabs.create(
@@ -136,7 +353,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ── 総集編クローラー: 停止 ──
   if (msg.type === "STOP_COMPILATION") {
     if (_crawlerTabId !== null) {
-      // タブに停止シグナルを送る（タブが自分で後始末して閉じる）
       chrome.tabs.sendMessage(_crawlerTabId, { type: "STOP_CRAWLER_TAB" }, () => {
         void chrome.runtime.lastError;
       });
@@ -155,18 +371,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const db = await _openDB();
         await new Promise((r, j) => {
-          const tx = db.transaction("scores", "readwrite");
+          const tx = db.transaction(["scores", "ghShards"], "readwrite");
           tx.objectStore("scores").clear();
+          tx.objectStore("ghShards").clear();
           tx.oncomplete = r; tx.onerror = j;
         });
-        _idb = null; // 次回 _openDB() で再接続
+        _idb = null;
+        await new Promise(r => chrome.storage.local.remove(["_ghManifestCache", "_ghIndexCache"], r));
         sendResponse({ ok: true });
       } catch (e) { sendResponse({ ok: false, err: String(e) }); }
     })();
     return true;
   }
 
-  // ── 総集編データ全初期化（RJリスト + 走査状態 + IndexedDB 全削除） ──
+  // ── 総集編データ全初期化 ──
   if (msg.type === "CLEAR_ALL_DATA") {
     const storageKeys = [
       "dlsite_compilations_v1",
@@ -175,15 +393,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       "dlsite_crawl_state",
       "dlsite_comp_progress",
       "dlsite_comp_pending_v1",
+      "_ghManifestCache",
+      "_ghIndexCache",
     ];
     (async () => {
       try {
         await new Promise(r => chrome.storage.local.remove(storageKeys, r));
         const db = await _openDB();
         await new Promise((r, j) => {
-          const tx = db.transaction(["scores", "items"], "readwrite");
+          const tx = db.transaction(["scores", "items", "ghShards"], "readwrite");
           tx.objectStore("scores").clear();
           tx.objectStore("items").clear();
+          tx.objectStore("ghShards").clear();
           tx.oncomplete = r; tx.onerror = j;
         });
         _idb = null;
@@ -325,29 +546,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // ── 価格データ取得（IndexedDB → dlwatcher.com の順でキャッシュ優先）──
+  // ── 価格データ取得 ──
+  // ★方針転換: 拡張は GitHub raw の共有DBを「拾うだけ」。dlwatcher.com への直接アクセスは行わない。
+  // 優先順位: ① IndexedDB キャッシュ(TTLは popup 設定に従う) → ② GitHub raw 共有DB
+  // ②でも見つからない場合（Actions未収録のRJ）は、古いキャッシュがあれば使い回し、無ければ失敗を返す。
   if (msg.type === "FETCH") {
     (async () => {
-      // IndexedDB に新鮮なキャッシュがあればそれを返す
+      const ttlMs  = await _getScoreTtlMs();
       const cached = await _getScore(msg.rj);
-      if (cached && Date.now() - cached.fetchedAt < _SCORE_TTL) {
+      if (cached && Date.now() - cached.fetchedAt < ttlMs) {
         sendResponse({ ok: true, data: cached.data });
         return;
       }
-      // なければ dlwatcher.com から取得してキャッシュに保存
-      const url        = "https://dlwatcher.com/product/" + msg.rj + ".json";
-      const controller = new AbortController();
-      const timer      = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-      try {
-        const res  = await fetch(url, { signal: controller.signal });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        clearTimeout(timer);
-        await _saveScore(msg.rj, data); // IndexedDB に保存
-        sendResponse({ ok: true, data });
-      } catch (err) {
-        clearTimeout(timer);
-        sendResponse({ ok: false, err: String(err) });
+
+      const ghData = await _fetchFromGithub(msg.rj, ttlMs);
+      if (ghData) {
+        await _saveScore(msg.rj, ghData);
+        sendResponse({ ok: true, data: ghData });
+        return;
+      }
+
+      if (cached) {
+        sendResponse({ ok: true, data: cached.data, stale: true });
+      } else {
+        sendResponse({ ok: false, err: "not_found_in_shared_db" });
       }
     })();
     return true;

@@ -41,19 +41,33 @@
     labelRed:        "",
     useTextScore:    false,
     showSaleWarning: true,
+    translateTags:   false,
+    enableAffiliate: true,
   };
 
   let settings = { ...DEFAULTS };
 
-  let cache = (() => {
-    try { return JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; }
-    catch { return {}; }
-  })();
+  // F項: JSON corruption recovery — 破損を検知したらキーを削除して空オブジェクトを返す
+  function _safeParseLS(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        console.warn("[DLscore] corrupted LS, clearing:", key);
+        localStorage.removeItem(key);
+        return {};
+      }
+      return parsed;
+    } catch {
+      console.warn("[DLscore] parse error, clearing:", key);
+      try { localStorage.removeItem(key); } catch {}
+      return {};
+    }
+  }
 
-  let priceHist = (() => {
-    try { return JSON.parse(localStorage.getItem(PRICE_HIST_KEY)) || {}; }
-    catch { return {}; }
-  })();
+  let cache     = _safeParseLS(CACHE_KEY);
+  let priceHist = _safeParseLS(PRICE_HIST_KEY);
 
   let lastPrune = 0;
   let lsTimer   = null;
@@ -151,11 +165,17 @@
                      ?.textContent?.trim() || "";
     const circle = document.querySelector(".maker_name a, a[href*='maker_id']")
                      ?.textContent?.trim() || "";
+    // 画像URL（次回スライド表示に使用）
+    const imgUrl =
+      document.querySelector("meta[property='og:image']")?.content ||
+      document.querySelector("img[itemprop='image']")?.src ||
+      document.querySelector(".work_right_info img, .slider_item img, .product_slider img")?.src ||
+      "";
     if (!genres.length && !title) return;
     chrome.storage.local.get({ [GENRE_HIST_KEY]: {} }, res => {
       if (chrome.runtime.lastError) return;
       const hist = res[GENRE_HIST_KEY];
-      hist[rj] = { title, genres, circle, score, viewedAt: Date.now() };
+      hist[rj] = { title, genres, circle, score, viewedAt: Date.now(), imgUrl };
       const keys = Object.keys(hist).sort((a, b) => (hist[a].viewedAt || 0) - (hist[b].viewedAt || 0));
       while (keys.length > 500) { delete hist[keys.shift()]; }
       chrome.storage.local.set({ [GENRE_HIST_KEY]: hist });
@@ -177,13 +197,15 @@
   function loadSeenRJs() {
     try {
       const stored = JSON.parse(localStorage.getItem(SEEN_RJS_KEY));
-      if (stored && stored.date === jstDateStr()) {
+      // F項: rjs が配列でない場合も破損とみなしてクリア
+      if (stored && stored.date === jstDateStr() && Array.isArray(stored.rjs)) {
         seenRJsToday = new Set(stored.rjs);
       } else {
         seenRJsToday = new Set();
         saveSeenRJs();
       }
     } catch {
+      try { localStorage.removeItem(SEEN_RJS_KEY); } catch {}
       seenRJsToday = new Set();
     }
   }
@@ -380,24 +402,98 @@
 
   let _pageVersion = 0;
 
+  // E項: tooltip singleton — 全要素でグローバル1要素を使い回す（tooltip増殖防止）
+  let _tipEl       = null;
+  let _tipTimer    = null;
+  let _tipOwner    = null;
+
+  function _getTipEl() {
+    if (_tipEl && _tipEl.isConnected) return _tipEl;
+    _tipEl = document.createElement("div");
+    _tipEl.style.cssText = [
+      "position:fixed", "z-index:2147483647",
+      "background:#222", "color:#eee", "font-size:11px",
+      "padding:6px 8px", "border-radius:5px",
+      "white-space:pre-wrap", "box-shadow:0 2px 8px rgba(0,0,0,.4)",
+      "pointer-events:none", "display:none", "max-width:200px",
+    ].join(";");
+    document.body.appendChild(_tipEl);
+    return _tipEl;
+  }
+
+  function _hideTip() {
+    if (_tipEl) _tipEl.style.display = "none";
+    _tipOwner = null;
+    clearTimeout(_tipTimer);
+  }
+
   function attachTouchTooltip(el, getTooltipText) {
     if (!IS_TOUCH) return;
-    let tip = null;
     el.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (tip) { tip.remove(); tip = null; return; }
-      tip = document.createElement("div");
-      tip.style.cssText = [
-        "position:absolute", "z-index:2147483647",
-        "background:#222", "color:#eee", "font-size:11px",
-        "padding:6px 8px", "border-radius:5px",
-        "white-space:pre", "box-shadow:0 2px 8px rgba(0,0,0,.4)",
-        "pointer-events:none",
-      ].join(";");
+      const tip = _getTipEl();
+      // 同じ要素の再タップで非表示
+      if (_tipOwner === el) { _hideTip(); return; }
+      _hideTip();
       tip.textContent = getTooltipText();
-      el.style.position = el.style.position || "relative";
-      el.appendChild(tip);
-      setTimeout(() => { tip?.remove(); tip = null; }, 3000);
+      tip.style.display = "block";
+      // クリック位置の近くに配置（画面端を越えないようにクランプ）
+      const rect = el.getBoundingClientRect();
+      const vw   = window.innerWidth;
+      const vh   = window.innerHeight;
+      let top  = rect.bottom + 4;
+      let left = rect.left;
+      if (top + 80 > vh)  top  = rect.top - 80;
+      if (left + 200 > vw) left = vw - 208;
+      tip.style.top  = `${Math.max(0, top)}px`;
+      tip.style.left = `${Math.max(0, left)}px`;
+      _tipOwner = el;
+      _tipTimer = setTimeout(_hideTip, 3000);
+    });
+  }
+
+  // 右上統計オーバーレイ（閲覧数・平均スコア）
+  function renderStatsOverlay() {
+    const today = jstDateStr();
+    chrome.storage.local.get({ [STATS_KEY]: {} }, res => {
+      if (chrome.runtime.lastError) return;
+      const todaySt = (res[STATS_KEY] || {})[today];
+      if (!todaySt?.count) { document.querySelector("#dlscore-stats")?.remove(); return; }
+
+      let el = document.querySelector("#dlscore-stats");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "dlscore-stats";
+        el.style.cssText = [
+          "position:fixed", "z-index:2147483646",
+          "font-size:11px", "font-family:sans-serif", "line-height:1.3",
+          "background:rgba(255,255,255,0.92)", "color:#333",
+          "border:1px solid #ccc", "border-radius:5px",
+          "padding:4px 8px", "box-shadow:0 1px 6px rgba(0,0,0,.15)",
+          "pointer-events:none",
+        ].join(";");
+        document.body.appendChild(el);
+      }
+
+      const avg = todaySt.count > 0 ? Math.round(todaySt.totalScore / todaySt.count) : 0;
+      el.textContent = `👁 ${todaySt.count}作品  avg ${avg}`;
+
+      // 詳細ページでは #dlscore-main の直下、一覧では右上固定
+      const mainEl = document.querySelector("#dlscore-main");
+      if (mainEl && isDetail) {
+        // requestAnimationFrame で #dlscore-main の位置確定後に配置
+        requestAnimationFrame(() => {
+          if (!el.isConnected) return;
+          const r = mainEl.getBoundingClientRect();
+          el.style.top   = `${r.bottom + 6}px`;
+          el.style.right = "12px";
+          el.style.left  = "";
+        });
+      } else {
+        el.style.top   = IS_TOUCH ? "56px" : "12px";
+        el.style.left  = "12px";
+        el.style.right = "";
+      }
     });
   }
 
@@ -514,6 +610,8 @@
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== "local") return;
+    // STATS_KEY のみの変更でも統計オーバーレイを更新
+    if (STATS_KEY in changes) renderStatsOverlay();
     if (Object.keys(changes).every(k => k === STATS_KEY)) return;
     if (COMPILATION_KEY in changes) {
       loadCompilations(() => updateCompilationBadges());
@@ -529,8 +627,47 @@
         try { resultCache.set(rj, calcScore(data, snap)); } catch {}
       }
     }
+    if ("translateTags" in changes) {
+      if (settings.translateTags) translateTags();
+      else removeTranslatedTags();
+    }
+    if ("enableAffiliate" in changes && settings.enableAffiliate) {
+      applyAffiliateLinks();
+    }
     applySettingsToRendered();
   });
+
+  // =====================
+  // タグ/ジャンル 英語対訳（tag_dict.js の TAG_EN / lookupTagEN を使用）
+  // processedTagEls は DOM ノードに紐づく WeakSet のため SPA 再描画時に
+  // 古いノードが GC されれば自動的にクリアされる（明示リセット不要）
+  // =====================
+  const TAG_SELECTOR =
+    "a[href*='genre_id'], a[href*='keyword_creater'], " +
+    ".main_genre a, .work_genre a, .search_tag a, #work_outline a[href*='genre']";
+  const processedTagEls = new WeakSet();
+
+  function translateTags() {
+    if (!settings.translateTags) return;
+    if (typeof lookupTagEN !== "function") return; // tag_dict.js 未ロード
+    document.querySelectorAll(TAG_SELECTOR).forEach(el => {
+      if (processedTagEls.has(el)) return;
+      processedTagEls.add(el);
+      const jp = el.textContent.trim();
+      const en = lookupTagEN(jp);
+      if (!en || en === jp) return;
+      const span = document.createElement("span");
+      span.dataset.dlscoreTagEn = "1";
+      span.style.cssText = "font-size:10px;color:#8899aa;margin-left:4px;";
+      span.textContent = `(${en})`;
+      el.insertAdjacentElement("afterend", span);
+    });
+  }
+
+  // 設定OFF時: 既に挿入した対訳スパンを一括除去
+  function removeTranslatedTags() {
+    document.querySelectorAll("[data-dlscore-tag-en]").forEach(el => el.remove());
+  }
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type !== "CLEAR_CACHE") return;
@@ -545,15 +682,46 @@
     renderedCards.clear();
     seenRJsToday.clear();
     statsBuffer = {};
+    _pendingCards.clear();
+    if (_lazyObserver) { _lazyObserver.disconnect(); _lazyObserver = null; }
     document.querySelector("#dlscore-main")?.remove();
+    document.querySelector("#dlscore-stats")?.remove();
     document.querySelectorAll("[data-dlscore-card]").forEach(el => el.remove());
     document.querySelectorAll("[data-dlscore-done]").forEach(el => { delete el.dataset.dlscoreDone; });
+    document.querySelectorAll("[data-dlscore-tag-en]").forEach(el => el.remove());
     runList();
     if (isDetail && mainRJ) fetchMainRJ();
   });
 
   const SKIP_HREF_PATTERN  = /(\/|[?&])(cart|trial|sample|dlzip|dlpurchase|add_cart|buy|coupon)([/?&#=]|$)/i;
   const SKIP_CLASS_PATTERN = /btn|button|cart|trial|sample|thumb|img|icon/i;
+
+  // J項: selector fallback registry
+  // DLsite のクラス名変更に備えて優先順配列で管理。先頭ほど精確なセレクター。
+  const CARD_SELECTORS = [
+    ".work_box",
+    "article",
+    ".search_result_item",
+    ".work_list_item",
+    "[class*='work_item']",
+    "li",
+  ];
+  const LIST_SELECTORS = [
+    ".recommend_list", ".same_group_list", ".work_slider",
+    "[class*='recommend']", "[class*='related']", "[class*='pickup']",
+    "[class*='ranking']",  "[class*='slider']",  "[class*='list']",
+  ];
+
+  function findCard(el) {
+    for (const sel of CARD_SELECTORS) {
+      const c = el.closest(sel);
+      if (c) return c;
+    }
+    return null;
+  }
+  function withinList(el) {
+    return LIST_SELECTORS.some(sel => el.closest(sel));
+  }
 
   function extractRJCardMap() {
     const rjCards = new Map();
@@ -565,29 +733,75 @@
       if (SKIP_HREF_PATTERN.test(a.href)) return;
       if (a.className && SKIP_CLASS_PATTERN.test(a.className)) return;
       if (a.children.length === 1 && a.children[0].tagName === "IMG") return;
-      const card =
-        a.closest(".work_box")           ||
-        a.closest("article")             ||
-        a.closest(".search_result_item") ||
-        a.closest("li");
+      const card = findCard(a);
       if (!card) return;
-      if (isDetail) {
-        const withinList =
-          card.closest(".recommend_list")      ||
-          card.closest(".same_group_list")     ||
-          card.closest(".work_slider")         ||
-          card.closest("[class*='recommend']") ||
-          card.closest("[class*='related']")   ||
-          card.closest("[class*='pickup']")    ||
-          card.closest("[class*='ranking']")   ||
-          card.closest("[class*='slider']")    ||
-          card.closest("[class*='list']");
-        if (!withinList) return;
-      }
+      if (isDetail && !withinList(card)) return;
       if (!rjCards.has(rj)) rjCards.set(rj, new Set());
       rjCards.get(rj).add(card);
     });
     return rjCards;
+  }
+
+  // ── アフィリエイトリンク自動置換 ──
+  // 作品詳細ページへの外部リンクを DLsite アフィリエイトリダイレクタへ書き換える。
+  // カート/体験版/購入リンクは対象外（SKIP_HREF_PATTERN で除外、機能破壊防止）。
+  const AFFILIATE_AID   = "SWSW457457";
+  const PRODUCT_LINK_RE = /\/(?:work\/=\/product_id\/)?(RJ\d{4,})\.html(?:[?#]|$)/i;
+
+  function affiliateUrl(rj) {
+    return `https://dlaf.jp/home/dlaf/=/t/n/link/work/aid/${AFFILIATE_AID}/id/${rj}.html`;
+  }
+
+  function applyAffiliateLinks() {
+    if (settings.enableAffiliate === false) return;
+    document.querySelectorAll("a[href]").forEach(a => {
+      if (a.dataset.dlscoreAff) return;
+      if (SKIP_HREF_PATTERN.test(a.href)) return;
+      const m = a.href.match(PRODUCT_LINK_RE);
+      if (!m) return;
+      a.dataset.dlscoreAff = "1";
+      a.href = affiliateUrl(m[1].toUpperCase());
+      a.rel  = a.rel && a.rel.includes("sponsored") ? a.rel : `${a.rel || ""} noopener sponsored`.trim();
+    });
+  }
+
+  // D項: IntersectionObserver によるlazy fetch
+  // 画面外のカードはスコア取得を遅延し、初期ページ読み込み時のfetch爆発を防ぐ
+  let   _lazyObserver = null;
+  const _pendingCards = new Map(); // rj → Set<card>
+
+  function _ensureLazyObserver() {
+    if (_lazyObserver) return;
+    _lazyObserver = new IntersectionObserver(entries => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const rj = e.target.dataset.dlscoreLazy;
+        if (!rj) continue;
+        _lazyObserver.unobserve(e.target);
+        delete e.target.dataset.dlscoreLazy;
+        const cards = _pendingCards.get(rj);
+        if (cards) { _pendingCards.delete(rj); processRJWithCards(rj, cards); }
+      }
+    }, { rootMargin: "300px 0px" });
+  }
+
+  function scheduleCard(rj, cards) {
+    if (fetchedRJs.has(rj)) {
+      const result = resultCache.get(rj);
+      if (result) cards.forEach(card => renderCard(card, result, rj, false));
+      return;
+    }
+    _ensureLazyObserver();
+    if (_pendingCards.has(rj)) {
+      const ex = _pendingCards.get(rj);
+      cards.forEach(c => ex.add(c));
+      return;
+    }
+    _pendingCards.set(rj, new Set(cards));
+    // カードの1枚目を観測ターゲットにする
+    const target = [...cards].find(c => c.isConnected);
+    if (target) { target.dataset.dlscoreLazy = rj; _lazyObserver.observe(target); }
+    else { _pendingCards.delete(rj); processRJWithCards(rj, cards); } // DOM外ならfallback
   }
 
   function processRJWithCards(rj, cards) {
@@ -632,6 +846,7 @@
         renderMain(result, checkPriceAlert(localRJ, data), data);
         recordStat(localRJ, result.score);        // 詳細ページのみカウント
         recordGenreHistory(localRJ, result.score); // ジャンル履歴記録
+        renderStatsOverlay();                       // 統計オーバーレイ更新
         const map       = extractRJCardMap();
         const mainCards = map.get(localRJ);
         if (mainCards?.size > 0) {
@@ -656,8 +871,10 @@
     const rjCardMap = extractRJCardMap();
     for (const [rj, cards] of rjCardMap.entries()) {
       if (rj === mainRJ) continue;
-      processRJWithCards(rj, cards);
+      scheduleCard(rj, cards);  // D項: IntersectionObserver lazy fetch
     }
+    translateTags();
+    applyAffiliateLinks();
   }
 
   let spaRunning     = false;
@@ -669,6 +886,8 @@
     window.__dlscoreUrl = newUrl;
     _pageVersion++;
     spaRunning = true;
+    // A項: background の進行中fetchを全キャンセル
+    chrome.runtime.sendMessage({ type: "ABORT_ALL_FETCHES" }, () => { void chrome.runtime.lastError; });
     clearTimeout(mutTimer);
     clearTimeout(domStableTimer);
 
@@ -687,13 +906,19 @@
         mainRJ   = getMainRJ(location.href);
         isDetail = getIsDetail();
         document.querySelector("#dlscore-main")?.remove();
+        document.querySelector("#dlscore-stats")?.remove();
         document.querySelectorAll("[data-dlscore-card]").forEach(el => el.remove());
         document.querySelectorAll("[data-dlscore-done]").forEach(el => { delete el.dataset.dlscoreDone; });
+        document.querySelectorAll("[data-dlscore-tag-en]").forEach(el => el.remove());
         fetchedRJs.clear();
         resultCache.clear();
         rawDataCache.clear();
         renderedCards.clear();
+        // D項: lazy observer をリセット
+        _pendingCards.clear();
+        if (_lazyObserver) { _lazyObserver.disconnect(); _lazyObserver = null; }
         runList();
+        _setupObserver(); // C項: SPA遷移後に監視ターゲットを再設定
         if (mainRJ && (isDetail || isDetailUrl(location.href))) {
           isDetail = true;
           fetchMainRJ();
@@ -711,6 +936,8 @@
   history.replaceState = function (...a) { _replace(...a); onUrlChange(); };
   window.addEventListener("popstate",          onUrlChange);
   window.addEventListener("dlscore:urlchange", onUrlChange);
+  // カウントバグ修正: pagehide でページ離脱前に確実にflush
+  window.addEventListener("pagehide", () => { if (statsDirty) flushStats(); });
 
   let compilationSet = new Set();
 
@@ -784,8 +1011,17 @@
     ? (fn) => requestIdleCallback(fn, { timeout: 1000 })
     : (fn) => setTimeout(fn, 200);
 
-  let mutTimer = null;
-  new MutationObserver((mutations) => {
+  // C項: MutationObserver scope限定 — DLsiteのメインコンテンツ領域のみ監視（body全体監視を回避）
+  function _getMutTarget() {
+    return document.querySelector(
+      "#search_result, #work_list, #center_column, main, #main, .wrapper"
+    ) || document.body;
+  }
+
+  let mutTimer    = null;
+  let _mutObserver = null;
+
+  const _mutCallback = (mutations) => {
     if (spaRunning) return;
     let hasPreview   = false;
     let hasNewRJLink = false;
@@ -805,7 +1041,14 @@
       clearTimeout(mutTimer);
       mutTimer = setTimeout(() => scheduleIdle(runList), 100);
     }
-  }).observe(document.body, { childList: true, subtree: true });
+  };
+
+  function _setupObserver() {
+    if (_mutObserver) { _mutObserver.disconnect(); _mutObserver = null; }
+    _mutObserver = new MutationObserver(_mutCallback);
+    _mutObserver.observe(_getMutTarget(), { childList: true, subtree: true });
+  }
+  _setupObserver();
 
   chrome.storage.local.get(DEFAULTS, (vals) => {
     if (!chrome.runtime.lastError) settings = vals;

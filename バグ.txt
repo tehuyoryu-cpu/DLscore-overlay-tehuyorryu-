@@ -15,6 +15,7 @@
 【解決済み】
 
 ■ UI / 表示関係
+- アフィリエイトリンク自動置換 → 作品詳細ページ(RJxxxx.html)への外部リンクを dlaf.jp アフィリエイトリダイレクタへ書き換え。カート/体験版等は SKIP_HREF_PATTERN で除外し購入導線を保護。popupの「🔗 アフィリエイトリンク」トグルでON/OFF可能（デフォルトON）
 - Firefox、閾値の数値を変更するボタンが白くて浮く → -moz-appearance:textfield で統一
 - renderMain の \n が改行されない → alertSpan を別要素で管理
 - renderMain の border に初期色未指定 → border:2px solid #ccc で仮色を設定
@@ -79,6 +80,15 @@
 - maniax/work/=/product_id/RJ~~~.htmlにスコアが表示されない → isDetailUrl()複数パターン対応、DOM未構築時リトライ
 - 総集編マーク機能 → dldshare.net の総集編タグページを全ページ巡回し RJ 番号を自動収集、chrome.storage.local に保存、カードと詳細オーバーレイに「📦 総集編あり」「📦 この作品は総集編が存在します」バッジを表示。ポップアップの「📦 総集編マーク一覧」セクションでリスト確認・個別削除・再取得が可能
 - 詳細ページで Alt+G を押すと購買意欲を掻き立てる AI 紹介文を生成してほしい → popup に AIレビューセクション（有効化トグル・Groq APIキー入力・文体選択4種）を追加、Groq API（llama-3.1-8b-instant、無料枠あり）で生成、画面下部モーダルに表示
+
+■ スコア共有DB化（本番実装）
+- dlwatcher.com への直接アクセスを廃止 → 別プロジェクト(siteruns23432, dataブランチ)がPC側アプリで価格を巡回・収集し、manifest.json/index/NN.json/shards/NNNN.json形式でGitHubにpush、拡張はraw.githubusercontent.com経由で「拾うだけ」に変更（background.js）
+- RJ→shard番号の解決にFNV-1aハッシュ(RJコード自体をハッシュ化しindex/NN.jsonへ分散)を実装、実データで解決経路(manifest→index→shard→adapt)をエンドツーエンド検証済み
+- shard内の圧縮スキーマ(p/s/d/os/po/dd/lp/lg)をcontent.js側が期待するdlwatcher互換の入れ子形式に変換する_adaptShardEntry()を追加（content.js自体は無改修）
+- crawler_tab.jsのPhase D(dlwatcher.comスコア取得)が host_permissions 削除後も残っていて壊れていた → Phase D・"refresh"モード・関連IndexedDBヘルパーを削除し、crawler_tab.jsは総集編RJ検出(Phase A/B/C)専任に整理
+- manifest.jsonのhost_permissionsを"https://raw.githubusercontent.com/*"（全リポジトリ）から配信元リポジトリのみに絞り込み、供給元データの型検証・サイズ上限(4MB)・配列長上限(100件)を追加してデータ改竄/巨大レスポンスへの耐性を強化
+- popupにスコア更新頻度(6時間/1日/1週間/1か月)の選択UIがなく、background.js側のTTL設定が常にデフォルト固定だった → 「データ管理」にドロップダウンを追加してscoreTtlMsを保存できるように修正
+- ヘルプ内のdlwatcher.com言及・古いTTL説明が実態と乖離 → 現行のGitHub共有DB方式に合わせて記述を修正
 
 
 ■ RJ Crawler Pro（別拡張）

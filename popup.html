@@ -204,6 +204,38 @@ body{
 }
 .comp-item-del:hover{color:var(--red);background:rgba(240,64,96,.1)}
 
+.pending-badge{
+  font-family:var(--mono);font-size:9px;font-weight:700;color:#fff;
+  background:var(--yellow);border-radius:10px;padding:1px 6px;min-width:14px;text-align:center;
+}
+.pending-hint{padding:4px 16px 8px;font-size:10px;color:var(--txt3);line-height:1.6}
+.pending-list{padding:0 16px 10px;display:flex;flex-direction:column;gap:6px}
+.pending-list-empty{font-size:10px;color:var(--txt3);padding:4px 16px 10px;font-family:var(--mono)}
+.pending-item{
+  background:var(--s2);border:1px solid var(--bd);border-radius:var(--r8);padding:8px 10px;
+}
+.pending-item-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.pending-item-rj{font-family:var(--mono);font-size:11px;color:var(--ac2);flex:1}
+.pending-item-rj a{color:inherit;text-decoration:none}
+.pending-item-rj a:hover{text-decoration:underline}
+.pending-item-score{
+  font-family:var(--mono);font-size:10px;font-weight:700;color:var(--yellow);
+  background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.3);border-radius:4px;padding:1px 6px;
+}
+.pending-item-comp{font-size:9px;color:var(--txt3);margin-bottom:5px;font-family:var(--mono)}
+.pending-item-reasons{display:flex;flex-wrap:wrap;gap:3px;margin-bottom:6px}
+.pending-reason-tag{
+  font-size:9px;background:var(--s3);border:1px solid var(--bd2);border-radius:3px;
+  color:var(--txt2);padding:1px 5px;
+}
+.pending-item-actions{display:flex;gap:6px}
+.pending-act{
+  flex:1;font-size:10px;font-weight:600;border-radius:var(--r6);padding:4px 0;cursor:pointer;
+  font-family:var(--head);border:1px solid var(--bd2);background:var(--s3);color:var(--txt2);transition:all .12s;
+}
+.pending-act.approve:hover{border-color:var(--green);color:var(--green);box-shadow:0 0 8px var(--g-glow)}
+.pending-act.reject:hover{border-color:var(--red);color:var(--red)}
+
 .help-list{padding:4px 0}
 .help-item{border-top:1px solid var(--bd)}
 .help-q{
@@ -320,6 +352,20 @@ body{
     <div id="compProgress" class="comp-prog" style="display:none"></div>
     <div class="search-wrap"><input id="compSearch" class="txt-in txt-in-full" type="search" placeholder="RJ検索…" autocomplete="off"></div>
     <div id="compListContainer"></div>
+  </div>
+</div>
+
+<!-- ⑤.5 要確認候補（低信頼度推定・セミオート確認） -->
+<div class="section">
+  <div class="section-hd" data-target="s-comp-pending">
+    <div class="shd-icon">🔍</div><span class="shd-label">要確認候補</span>
+    <span class="pending-badge" id="pendingBadge" style="display:none">0</span><span class="arrow">▾</span>
+  </div>
+  <div class="section-body" id="s-comp-pending">
+    <div class="pending-hint">
+      収録の根拠が弱い推定候補です。作品ページを開いて内容を確認のうえ、✓確定 または ✕却下 してください。
+    </div>
+    <div id="pendingListContainer"></div>
   </div>
 </div>
 

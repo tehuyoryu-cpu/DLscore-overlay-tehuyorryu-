@@ -10,6 +10,7 @@ setInterval(() => {
 // ── 定数 ──
 const _PROG_KEY        = "dlsite_comp_progress";
 const _COMP_KEY        = "dlsite_compilations_v1";
+const _COMP_PENDING_KEY = "dlsite_comp_pending_v1";
 const FETCH_TIMEOUT_MS = 15_000;
 const _SCORE_TTL       = 6 * 60 * 60 * 1000;
 const _REFRESH_ALARM   = "dlscore_score_refresh";
@@ -173,6 +174,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       "dlsite_processed_comps_v1",
       "dlsite_crawl_state",
       "dlsite_comp_progress",
+      "dlsite_comp_pending_v1",
     ];
     (async () => {
       try {
@@ -186,6 +188,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         _idb = null;
         sendResponse({ ok: true });
+      } catch (e) { sendResponse({ ok: false, err: String(e) }); }
+    })();
+    return true;
+  }
+
+  // ── 要確認候補（低信頼度推定）の承認: pendingから消してcompilationsに確定登録 ──
+  if (msg.type === "APPROVE_PENDING") {
+    (async () => {
+      try {
+        const r = await chrome.storage.local.get({ [_COMP_PENDING_KEY]: [], [_COMP_KEY]: [] });
+        const pending = r[_COMP_PENDING_KEY].filter(e => !(e.rj === msg.rj && e.compRj === msg.compRj));
+        const confirmed = [...new Set([...r[_COMP_KEY], msg.rj])].sort();
+        await new Promise(res => chrome.storage.local.set(
+          { [_COMP_PENDING_KEY]: pending, [_COMP_KEY]: confirmed }, res));
+        sendResponse({ ok: true, pendingCount: pending.length });
+      } catch (e) { sendResponse({ ok: false, err: String(e) }); }
+    })();
+    return true;
+  }
+
+  // ── 要確認候補の却下: pendingから消すだけ（confirmed化しない） ──
+  if (msg.type === "REJECT_PENDING") {
+    (async () => {
+      try {
+        const r = await chrome.storage.local.get({ [_COMP_PENDING_KEY]: [] });
+        const pending = r[_COMP_PENDING_KEY].filter(e => !(e.rj === msg.rj && e.compRj === msg.compRj));
+        await new Promise(res => chrome.storage.local.set({ [_COMP_PENDING_KEY]: pending }, res));
+        sendResponse({ ok: true, pendingCount: pending.length });
       } catch (e) { sendResponse({ ok: false, err: String(e) }); }
     })();
     return true;

@@ -163,6 +163,11 @@ function parseCandidatesFromSearch(html, selfRJ) {
 }
 
 const THRESHOLD = 60;
+// 高信頼度しきい値: これ未満(60〜99)は「推定はしたが根拠が弱い」候補として
+// 自動マークせず、popup.js の「要確認」キューに回してユーザーに確認してもらう。
+// 100以上は、ページ数組合せ一致(+80)やイベント完全一致(+50)+日付一致など、
+// 複数の裏付けが揃って初めて到達する水準のため自動マーク対象とする。
+const HIGH_CONFIDENCE = 100;
 
 function scoreCandidate(comp, cand) {
   let score=0; const why=[];
@@ -263,12 +268,12 @@ async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldCon
   const CONCUR     = 5;
 
   const comp=parseCompMeta(html,compRJ);
-  if(!comp.circleId) return [];
+  if(!comp.circleId) return {high:[], review:[]};
 
   // Phase 1: 検索結果HTMLからタイトル付き候補リストを作成
   const titleMap=new Map();
   for(let page=1;page<=5;page++){
-    if(!shouldContinue()) return [];
+    if(!shouldContinue()) return {high:[], review:[]};
     let pageHtml;
     try{pageHtml=await getText(CIRCLE_URL(comp.circleId,page));}
     catch{break;}
@@ -276,7 +281,7 @@ async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldCon
     if(titleMap.size-(page-1)*100<90) break;
     await sleep(200);
   }
-  if(!titleMap.size) return [];
+  if(!titleMap.size) return {high:[], review:[]};
 
   // Phase 1.5: タイトル類似度で事前フィルタ
   const cn=normalizeTitle(comp.title);
@@ -334,7 +339,15 @@ async function estimateContents(compRJ, html, getText, getJSON, sleep, shouldCon
   }
 
   const limit=comp.workCount>0?comp.workCount*2:20;
-  const result=scored.slice(0,limit).map(r=>r.rj);
-  console.debug(`[CompAnalyzer] ${compRJ}: ${result.length}件推定`,scored.slice(0,5).map(r=>`${r.rj}(${r.score})`));
-  return result;
+  const capped=scored.slice(0,limit);
+
+  // 正確性優先: HIGH_CONFIDENCE(100)以上のみ自動マーク対象(high)。
+  // 60〜99は根拠はあるが確信が持てない水準のため、review(要確認)に回す。
+  const high   = capped.filter(r=>r.score>=HIGH_CONFIDENCE).map(r=>r.rj);
+  const review = capped.filter(r=>r.score<HIGH_CONFIDENCE)
+    .map(r=>({ rj:r.rj, compRj:compRJ, score:r.score, reasons:r.reasons }));
+
+  console.debug(`[CompAnalyzer] ${compRJ}: 確実${high.length}件 / 要確認${review.length}件`,
+    capped.slice(0,5).map(r=>`${r.rj}(${r.score})`));
+  return { high, review };
 }

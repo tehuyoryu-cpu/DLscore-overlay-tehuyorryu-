@@ -632,7 +632,7 @@
       else removeTranslatedTags();
     }
     if ("enableAffiliate" in changes && settings.enableAffiliate) {
-      applyAffiliateLinks();
+      extractRJCardMap(); // 副作用でアフィリエイト再走査（トグルON時のみ、稀な操作なので許容）
     }
     applySettingsToRendered();
   });
@@ -723,9 +723,36 @@
     return LIST_SELECTORS.some(sel => el.closest(sel));
   }
 
+  // ── アフィリエイトリンク自動置換 ──
+  // 作品詳細ページへの外部リンクを DLsite アフィリエイトリダイレクタへ書き換える。
+  // カート/体験版/購入リンクは対象外（SKIP_HREF_PATTERN で除外、機能破壊防止）。
+  // dlaf.jp（アフィリエイトリダイレクタ自体）へのリンクは除外設定（二重変換・無限リダイレクト防止）。
+  const AFFILIATE_AID    = "SWSW457457";
+  const AFFILIATE_HOST   = "dlaf.jp";
+  const PRODUCT_LINK_RE  = /\/(?:work\/=\/product_id\/)?(RJ\d{4,})\.html(?:[?#]|$)/i;
+
+  function affiliateUrl(rj) {
+    return `https://${AFFILIATE_HOST}/home/dlaf/=/t/n/link/work/aid/${AFFILIATE_AID}/id/${rj}.html`;
+  }
+
+  // 1アンカーぶんの軽量チェック。extractRJCardMap の単一DOM走査に相乗りさせ、
+  // タブが多い状態でも querySelectorAll を二重実行しない（重量化対策）。
+  function applyAffiliateOne(a) {
+    if (settings.enableAffiliate === false) return;
+    if (a.dataset.dlscoreAff) return;
+    if (a.hostname === AFFILIATE_HOST) { a.dataset.dlscoreAff = "1"; return; } // 除外設定
+    if (SKIP_HREF_PATTERN.test(a.href)) return;
+    const m = a.href.match(PRODUCT_LINK_RE);
+    if (!m) return;
+    a.dataset.dlscoreAff = "1";
+    a.href = affiliateUrl(m[1].toUpperCase());
+    a.rel  = a.rel && a.rel.includes("sponsored") ? a.rel : `${a.rel || ""} noopener sponsored`.trim();
+  }
+
   function extractRJCardMap() {
     const rjCards = new Map();
     document.querySelectorAll("a[href]").forEach(a => {
+      applyAffiliateOne(a); // 同一走査でアフィリエイト置換も済ませる
       const m = a.href.match(/[/=](RJ\d{4,})/i);
       if (!m) return;
       const rj = m[1].toUpperCase();
@@ -740,29 +767,6 @@
       rjCards.get(rj).add(card);
     });
     return rjCards;
-  }
-
-  // ── アフィリエイトリンク自動置換 ──
-  // 作品詳細ページへの外部リンクを DLsite アフィリエイトリダイレクタへ書き換える。
-  // カート/体験版/購入リンクは対象外（SKIP_HREF_PATTERN で除外、機能破壊防止）。
-  const AFFILIATE_AID   = "SWSW457457";
-  const PRODUCT_LINK_RE = /\/(?:work\/=\/product_id\/)?(RJ\d{4,})\.html(?:[?#]|$)/i;
-
-  function affiliateUrl(rj) {
-    return `https://dlaf.jp/home/dlaf/=/t/n/link/work/aid/${AFFILIATE_AID}/id/${rj}.html`;
-  }
-
-  function applyAffiliateLinks() {
-    if (settings.enableAffiliate === false) return;
-    document.querySelectorAll("a[href]").forEach(a => {
-      if (a.dataset.dlscoreAff) return;
-      if (SKIP_HREF_PATTERN.test(a.href)) return;
-      const m = a.href.match(PRODUCT_LINK_RE);
-      if (!m) return;
-      a.dataset.dlscoreAff = "1";
-      a.href = affiliateUrl(m[1].toUpperCase());
-      a.rel  = a.rel && a.rel.includes("sponsored") ? a.rel : `${a.rel || ""} noopener sponsored`.trim();
-    });
   }
 
   // D項: IntersectionObserver によるlazy fetch
@@ -868,13 +872,12 @@
   }
 
   function runList() {
-    const rjCardMap = extractRJCardMap();
+    const rjCardMap = extractRJCardMap(); // アフィリエイト置換も同一走査内で実施
     for (const [rj, cards] of rjCardMap.entries()) {
       if (rj === mainRJ) continue;
       scheduleCard(rj, cards);  // D項: IntersectionObserver lazy fetch
     }
     translateTags();
-    applyAffiliateLinks();
   }
 
   let spaRunning     = false;
@@ -1021,8 +1024,20 @@
   let mutTimer    = null;
   let _mutObserver = null;
 
+  // ── バックグラウンドタブ抑制 ──
+  // タブを開きすぎた際の重量化対策: 非表示タブでは MutationObserver 起因の
+  // 再走査(DOM全anchor走査+fetch)を保留し、フォアグラウンド復帰時に1回だけ実行する。
+  let _needsRescanOnShow = false;
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && _needsRescanOnShow) {
+      _needsRescanOnShow = false;
+      scheduleIdle(runList);
+    }
+  });
+
   const _mutCallback = (mutations) => {
     if (spaRunning) return;
+    if (document.hidden) { _needsRescanOnShow = true; return; }
     let hasPreview   = false;
     let hasNewRJLink = false;
     for (const m of mutations) {

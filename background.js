@@ -73,12 +73,14 @@ function _fnv1a(str) {
   return h >>> 0;
 }
 
-// ── bug③修正: SW 再起動時に残留「走査中」フラグをクリア ──
-chrome.storage.local.get({ [_PROG_KEY]: null }, (res) => {
-  if (res[_PROG_KEY]?.running) {
-    chrome.storage.local.set({ [_PROG_KEY]: { running: false, phase: "停止（再開可能）" } });
-  }
-});
+// ── SW 再起動時の状態整合 ──
+// 旧実装は SW 再起動のたびに「走査中」フラグを無条件でクリアしていたが、
+// MV3 の Service Worker は実行中のタブがあっても数十秒のアイドルで頻繁に
+// 再起動されるため、実際にはクローラータブがまだ動いているのに popup 側が
+// 「停止中」と誤表示し、ユーザーが再度「取得」を押して二重にタブを開いて
+// しまう（＝タブが増殖して重くなる）原因になっていた。
+// → 実際に crawler_tab.html のタブが存在するかを確認してから整合させる。
+// （_reconcileCrawlerTabs は _crawlerTabId 宣言後に呼び出す）
 
 // ── IndexedDB（crawler_tab.js と同じ DB。ローカルキャッシュ + GitHub shard キャッシュ）──
 // v3: ghShards ストアを追加（GitHub raw の shard-N.json をキャッシュする用途）。
@@ -313,6 +315,28 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 // ── クローラータブ管理（総集編マーク機能。スコア取得とは無関係）──
 let _crawlerTabId = null;
 
+async function _reconcileCrawlerTabs() {
+  try {
+    const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL("crawler_tab.html") });
+    if (tabs.length === 0) {
+      _crawlerTabId = null;
+      const res = await chrome.storage.local.get({ [_PROG_KEY]: null });
+      if (res[_PROG_KEY]?.running) {
+        await chrome.storage.local.set({ [_PROG_KEY]: { running: false, phase: "停止（再開可能）" } });
+      }
+      return;
+    }
+    // 過去のSW再起動バグ等で複数タブが増殖していた場合は最初の1つだけを残し、
+    // 残りは閉じてブラウザの負荷を軽減する。
+    _crawlerTabId = tabs[0].id;
+    if (tabs.length > 1) {
+      try { await chrome.tabs.remove(tabs.slice(1).map(t => t.id)); } catch {}
+    }
+  } catch { /* ignore */ }
+}
+
+_reconcileCrawlerTabs();
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId !== _crawlerTabId) return;
   _crawlerTabId = null;
@@ -328,12 +352,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // ── 総集編クローラー: タブを開いて実行 ──
   if (msg.type === "FETCH_COMPILATION") {
-    if (_crawlerTabId !== null) {
-      sendResponse({ ok: false, reason: "already_running" });
-      return;
-    }
-    const mode = msg.mode === "resume" ? "resume" : "crawl";
-    chrome.storage.local.set({ dlsite_crawler_mode: mode }, () => {
+    (async () => {
+      // _crawlerTabId は SW 再起動で失われている可能性があるため、都度実タブで確認する
+      await _reconcileCrawlerTabs();
+      if (_crawlerTabId !== null) {
+        sendResponse({ ok: false, reason: "already_running" });
+        return;
+      }
+      const mode = msg.mode === "resume" ? "resume" : "crawl";
+      await chrome.storage.local.set({ dlsite_crawler_mode: mode });
       chrome.tabs.create(
         { url: chrome.runtime.getURL("crawler_tab.html"), active: false },
         (tab) => {
@@ -346,7 +373,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           sendResponse({ ok: true, started: true });
         }
       );
-    });
+    })();
     return true;
   }
 

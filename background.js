@@ -183,16 +183,33 @@ async function _saveShardCache(shardNo, data) {
 }
 
 // ── manifest.json 取得（1時間キャッシュ、取得失敗時は古いキャッシュにフォールバック）──
+// L項: 同時多発fetch対策（100件スコア表示時の重量化対策）
+// スコア表示対象が一度に多いと、キャッシュ未確定のうちに同じmanifest/index/shardへの
+// FETCHメッセージが並行で何十件も届く。従来はリクエストごとに独立してfetch()していたため、
+// 同一ファイルへの重複ネットワークアクセスが発生していた（例: 100件同時表示で
+// manifest.jsonへの同時fetchが最大100回走りうる）。in-flightのPromiseを共有キャッシュし、
+// 同一キーへの後続呼び出しは新規fetchを起こさず既存Promiseを待つだけにする。
+let _manifestInflight = null;
+const _indexInflight = new Map(); // idxId → Promise
+const _shardInflight  = new Map(); // shardId → Promise
 async function _getGithubManifest() {
   const cached = await _storageGet("_ghManifestCache");
   if (cached && Date.now() - cached.fetchedAt < _GH_META_TTL) return cached.data;
+  if (_manifestInflight) return _manifestInflight; // 重複fetch防止
 
-  const data = await _fetchJSON(`${_GITHUB_RAW_BASE}manifest.json`);
-  if (data) {
-    await _storageSet("_ghManifestCache", { data, fetchedAt: Date.now() });
-    return data;
+  _manifestInflight = (async () => {
+    const data = await _fetchJSON(`${_GITHUB_RAW_BASE}manifest.json`);
+    if (data) {
+      await _storageSet("_ghManifestCache", { data, fetchedAt: Date.now() });
+      return data;
+    }
+    return cached?.data ?? null; // 取得失敗時は期限切れでも古いキャッシュを使う
+  })();
+  try {
+    return await _manifestInflight;
+  } finally {
+    _manifestInflight = null;
   }
-  return cached?.data ?? null; // 取得失敗時は期限切れでも古いキャッシュを使う
 }
 
 // ── index/{NN}.json 取得（RJ→dataShard番号 のマップ。RJコード自体でハッシュ分散済み）──
@@ -210,13 +227,26 @@ async function _getGithubIndex(manifest, rj) {
   const cached = all[idxId];
   if (cached && Date.now() - cached.fetchedAt < _GH_META_TTL) return cached.data;
 
-  const data = await _fetchJSON(`${_GITHUB_RAW_BASE}${idxPath}`);
-  if (data) {
-    all[idxId] = { data, fetchedAt: Date.now() };
-    await _storageSet("_ghIndexCache", all);
-    return data;
+  // 同一idxIdへの同時リクエストは1本のfetchに合流させる（64バケットしかないため
+  // 100件同時表示だと同じidxIdに複数RJが集中しやすく、重複fetchの主要因になる）。
+  if (_indexInflight.has(idxId)) return _indexInflight.get(idxId);
+
+  const promise = (async () => {
+    const data = await _fetchJSON(`${_GITHUB_RAW_BASE}${idxPath}`);
+    if (data) {
+      const latest = (await _storageGet("_ghIndexCache")) || {};
+      latest[idxId] = { data, fetchedAt: Date.now() };
+      await _storageSet("_ghIndexCache", latest);
+      return data;
+    }
+    return cached?.data ?? null;
+  })();
+  _indexInflight.set(idxId, promise);
+  try {
+    return await promise;
+  } finally {
+    _indexInflight.delete(idxId);
   }
-  return cached?.data ?? null;
 }
 
 // ── shards/{NNNN}.json 取得（該当shardのみダウンロード。TTLは popup 設定に従う）──
@@ -225,13 +255,25 @@ async function _getGithubShard(shardId, ttlMs) {
   const cached = await _getShardCache(shardId);
   if (cached && Date.now() - cached.fetchedAt < ttlMs) return cached.data;
 
-  const path = `shards/${String(shardId).padStart(4, "0")}.json`;
-  const data = await _fetchJSON(`${_GITHUB_RAW_BASE}${path}`);
-  if (data) {
-    await _saveShardCache(shardId, data);
-    return data;
+  // 1024バケットとはいえ100件同時表示では同一shardに複数RJが乗ることがあるため、
+  // ここでも同時fetchを1本化する。
+  if (_shardInflight.has(shardId)) return _shardInflight.get(shardId);
+
+  const promise = (async () => {
+    const path = `shards/${String(shardId).padStart(4, "0")}.json`;
+    const data = await _fetchJSON(`${_GITHUB_RAW_BASE}${path}`);
+    if (data) {
+      await _saveShardCache(shardId, data);
+      return data;
+    }
+    return cached?.data ?? null;
+  })();
+  _shardInflight.set(shardId, promise);
+  try {
+    return await promise;
+  } finally {
+    _shardInflight.delete(shardId);
   }
-  return cached?.data ?? null;
 }
 
 // ── shard内の圧縮スキーマ → content.js が期待する dlwatcher互換の入れ子形式に変換 ──

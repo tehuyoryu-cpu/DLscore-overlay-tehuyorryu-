@@ -100,6 +100,9 @@ function createVirtualList(pageSize = 50) {
   };
 }
 const compVL = createVirtualList(50);
+// M項: 検索欄の入力効率化用キャッシュ（loadCompilationList/renderCompilationListで使用）。
+// null=未取得、[]=空も含めキャッシュ済み。COMPILATION_KEY変化時にnullへリセットされる。
+let _compListCache = null;
 
 const DEFAULTS = {
   showOverlay:     true,
@@ -176,7 +179,7 @@ function loadStats() {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[STATS_KEY])       loadStats();
-  if (area === "local" && changes[COMPILATION_KEY]) loadCompilationList();
+  if (area === "local" && changes[COMPILATION_KEY]) { _compListCache = null; loadCompilationList(); }
   if (area === "local" && changes[PENDING_KEY])     loadPendingList();
 });
 
@@ -310,66 +313,84 @@ function initCompFetchBtn() {
   }
 }
 
+// M項: 検索欄の入力効率化対策
+// 従来は入力(input)イベントのたびに chrome.storage.local.get で全RJリストを
+// 再取得→フィルタ→再描画しており、収集件数が多いタブでは1打鍵ごとに
+// IPCラウンドトリップ＋大きな配列のJSONデシリアライズが発生していた。
+// リストは COMPILATION_KEY の storage.onChanged 経由でしか変化しないため、
+// メモリキャッシュを持たせて検索時は再取得せずフィルタのみ行う。
 function loadCompilationList() {
   const container = document.getElementById("compListContainer");
   if (!container) return;
 
   const keyword = document.getElementById("compSearch")?.value || "";
 
+  if (_compListCache !== null) {
+    renderCompilationList(container, _compListCache, keyword);
+    return;
+  }
+
   chrome.storage.local.get({ [COMPILATION_KEY]: [] }, (res) => {
     if (chrome.runtime.lastError) return;
-    const raw  = res[COMPILATION_KEY] || [];
-    const list = filterRJList(raw, keyword);
+    _compListCache = res[COMPILATION_KEY] || [];
+    renderCompilationList(container, _compListCache, keyword);
+  });
+}
 
-    container.innerHTML = "";
+function renderCompilationList(container, raw, keyword) {
+  const list = filterRJList(raw, keyword);
 
-    if (list.length === 0) {
-      container.className   = "comp-list-empty";
-      container.textContent = keyword ? "一致する作品がありません" : "マークされた作品はありません";
-      return;
-    }
+  if (list.length === 0) {
+    container.className   = "comp-list-empty";
+    container.textContent = keyword ? "一致する作品がありません" : "マークされた作品はありません";
+    return;
+  }
 
-    container.className = "comp-list";
+  container.className = "comp-list";
 
-    const visible = compVL.getVisible(list);
+  const visible = compVL.getVisible(list);
+  // DocumentFragmentにまとめてから1回でappendすることで、レイアウト/スタイル
+  // 再計算(reflow)を件数ぶん発生させず1回に抑える。
+  const frag = document.createDocumentFragment();
 
-    visible.forEach(rj => {
-      const item = document.createElement("div");
-      item.className = "comp-item";
+  visible.forEach(rj => {
+    const item = document.createElement("div");
+    item.className = "comp-item";
 
-      const rjSpan = document.createElement("span");
-      rjSpan.className   = "comp-item-rj";
-      rjSpan.textContent = rj;
+    const rjSpan = document.createElement("span");
+    rjSpan.className   = "comp-item-rj";
+    rjSpan.textContent = rj;
 
-      const delBtn = document.createElement("button");
-      delBtn.className   = "comp-item-del";
-      delBtn.textContent = "✕";
-      delBtn.title       = "リストから削除";
-      delBtn.addEventListener("click", () => {
-        chrome.storage.local.get({ [COMPILATION_KEY]: [] }, (r2) => {
-          const updated = (r2[COMPILATION_KEY] || []).filter(r => r !== rj);
-          chrome.storage.local.set({ [COMPILATION_KEY]: updated }, loadCompilationList);
-        });
+    const delBtn = document.createElement("button");
+    delBtn.className   = "comp-item-del";
+    delBtn.textContent = "✕";
+    delBtn.title       = "リストから削除";
+    delBtn.addEventListener("click", () => {
+      chrome.storage.local.get({ [COMPILATION_KEY]: [] }, (r2) => {
+        const updated = (r2[COMPILATION_KEY] || []).filter(r => r !== rj);
+        chrome.storage.local.set({ [COMPILATION_KEY]: updated }); // loadCompilationListはonChangedで自動発火
       });
-
-      item.appendChild(rjSpan);
-      item.appendChild(delBtn);
-      container.appendChild(item);
     });
 
-    if (visible.length < list.length) {
-      const remaining = list.length - visible.length;
-      const moreBtn = document.createElement("button");
-      moreBtn.className   = "act-btn";
-      moreBtn.style.cssText = "margin:4px 0 2px;width:100%";
-      moreBtn.textContent = `さらに ${Math.min(50, remaining)} 件表示（残 ${remaining} 件）`;
-      moreBtn.addEventListener("click", () => {
-        compVL.showMore();
-        loadCompilationList();
-      });
-      container.appendChild(moreBtn);
-    }
+    item.appendChild(rjSpan);
+    item.appendChild(delBtn);
+    frag.appendChild(item);
   });
+
+  if (visible.length < list.length) {
+    const remaining = list.length - visible.length;
+    const moreBtn = document.createElement("button");
+    moreBtn.className   = "act-btn";
+    moreBtn.style.cssText = "margin:4px 0 2px;width:100%";
+    moreBtn.textContent = `さらに ${Math.min(50, remaining)} 件表示（残 ${remaining} 件）`;
+    moreBtn.addEventListener("click", () => {
+      compVL.showMore();
+      loadCompilationList();
+    });
+    frag.appendChild(moreBtn);
+  }
+
+  container.replaceChildren(frag);
 }
 
 // ── 要確認候補（低信頼度推定・セミオート確認）────────────────────────────────
@@ -576,12 +597,16 @@ function initPopup() {
       });
     }
 
-    // RJ検索
+    // RJ検索（デバウンス: 連続入力のたびにフィルタ+再描画が走らないよう120ms待つ）
     const searchEl = document.getElementById("compSearch");
     if (searchEl) {
+      let searchDebounce = null;
       searchEl.addEventListener("input", () => {
-        compVL.reset();
-        loadCompilationList();
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => {
+          compVL.reset();
+          loadCompilationList();
+        }, 120);
       });
     }
   } catch (e) {

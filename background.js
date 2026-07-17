@@ -32,14 +32,25 @@ const TTL_OPTIONS = {
 };
 const DEFAULT_TTL_OPTION = "6h";
 
+// N項: TTL設定の読み取りキャッシュ（100件同時スコア表示の重量化対策・続き）
+// _getScoreTtlMs() は FETCH メッセージのたびに(=RJごとに)呼ばれていたため、
+// 100件同時表示だと同じ設定値を得るためだけに chrome.storage.local.get の
+// IPC往復が100回発生していた。値は popup 操作でしか変わらないので、
+// メモリキャッシュしつつ storage.onChanged で即時無効化する。
+let _ttlCache = null;
 async function _getScoreTtlMs() {
+  if (_ttlCache !== null) return _ttlCache;
   try {
     const res = await chrome.storage.local.get({ [TTL_KEY]: DEFAULT_TTL_OPTION });
-    return TTL_OPTIONS[res[TTL_KEY]] ?? TTL_OPTIONS[DEFAULT_TTL_OPTION];
+    _ttlCache = TTL_OPTIONS[res[TTL_KEY]] ?? TTL_OPTIONS[DEFAULT_TTL_OPTION];
   } catch {
-    return TTL_OPTIONS[DEFAULT_TTL_OPTION];
+    _ttlCache = TTL_OPTIONS[DEFAULT_TTL_OPTION];
   }
+  return _ttlCache;
 }
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && TTL_KEY in changes) _ttlCache = null; // 次回呼び出しで再取得
+});
 
 // ── GitHub raw（共有スコアDB）設定 ──
 // 実データ配信元: tehuyoryu-cpu/siteruns23432 の data ブランチ。
@@ -105,12 +116,49 @@ function _openDB() {
   });
 }
 
+// M項: IndexedDB書き込みのバッチ化（100件同時スコア表示の重量化対策・続き）
+// _saveScore/_saveShardCache は従来リクエストごとに独立した readwrite トランザクションを
+// 開いていた。IndexedDBの同一storeへのreadwriteトランザクションはブラウザ内部で直列化
+// されるため、100件が短時間に返ってくると数十〜百本のトランザクションが数珠つなぎに
+// 実行され、コミット待ちの累積で体感の重さにつながる。
+// 書き込みをMapにキューイングし、短いdebounce後に1トランザクションへまとめる。
+function _createBatchedWriter(storeName, debounceMs = 80) {
+  const queue = new Map();
+  let timer = null;
+  async function flush() {
+    timer = null;
+    if (queue.size === 0) return;
+    const items = [...queue.values()];
+    queue.clear();
+    try {
+      const db = await _openDB();
+      const tx = db.transaction(storeName, "readwrite");
+      const store = tx.objectStore(storeName);
+      items.forEach(it => store.put(it));
+      await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
+    } catch {}
+  }
+  return {
+    queue(key, value) {
+      queue.set(key, value);
+      if (!timer) timer = setTimeout(flush, debounceMs);
+    },
+    peek(key) { return queue.get(key) ?? null; }, // flush前でも読み取れるように
+    clear() { queue.clear(); clearTimeout(timer); timer = null; }, // DBリセット時の取りこぼし書き戻し防止
+  };
+}
+const _scoreWriter = _createBatchedWriter("scores");
+const _shardWriter  = _createBatchedWriter("ghShards");
+
 async function _getScore(rj) {
+  const RJ = rj.toUpperCase();
+  const pending = _scoreWriter.peek(RJ); // flush待ちのキューも先に確認（取りこぼし防止）
+  if (pending) return pending;
   try {
     const db = await _openDB();
     return await new Promise((resolve) => {
       const req = db.transaction("scores", "readonly")
-                    .objectStore("scores").get(rj.toUpperCase());
+                    .objectStore("scores").get(RJ);
       req.onsuccess = () => resolve(req.result ?? null);
       req.onerror   = () => resolve(null);
     });
@@ -118,12 +166,7 @@ async function _getScore(rj) {
 }
 
 async function _saveScore(rj, data) {
-  try {
-    const db = await _openDB();
-    const tx = db.transaction("scores", "readwrite");
-    tx.objectStore("scores").put({ rj: rj.toUpperCase(), data, fetchedAt: Date.now() });
-    await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
-  } catch {}
+  _scoreWriter.queue(rj.toUpperCase(), { rj: rj.toUpperCase(), data, fetchedAt: Date.now() });
 }
 
 // ── 汎用: タイムアウト付き fetch → JSON（失敗時は null）──
@@ -164,6 +207,8 @@ function _storageSet(key, value) {
 
 // ── shard キャッシュ（IndexedDB。ファイル自体がそこそこ大きいため storage.local ではなくこちら）──
 async function _getShardCache(shardNo) {
+  const pending = _shardWriter.peek(shardNo); // flush待ちのキューも先に確認
+  if (pending) return pending;
   try {
     const db = await _openDB();
     return await new Promise((resolve) => {
@@ -174,12 +219,7 @@ async function _getShardCache(shardNo) {
   } catch { return null; }
 }
 async function _saveShardCache(shardNo, data) {
-  try {
-    const db = await _openDB();
-    const tx = db.transaction("ghShards", "readwrite");
-    tx.objectStore("ghShards").put({ shard: shardNo, data, fetchedAt: Date.now() });
-    await new Promise((r, j) => { tx.oncomplete = r; tx.onerror = j; });
-  } catch {}
+  _shardWriter.queue(shardNo, { shard: shardNo, data, fetchedAt: Date.now() });
 }
 
 // ── manifest.json 取得（1時間キャッシュ、取得失敗時は古いキャッシュにフォールバック）──
@@ -438,6 +478,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "CLEAR_SCORE_DB") {
     (async () => {
       try {
+        _scoreWriter.clear(); _shardWriter.clear(); // flush待ちキューの取りこぼし書き戻しを防止
         const db = await _openDB();
         await new Promise((r, j) => {
           const tx = db.transaction(["scores", "ghShards"], "readwrite");
@@ -467,6 +508,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     ];
     (async () => {
       try {
+        _scoreWriter.clear(); _shardWriter.clear(); // flush待ちキューの取りこぼし書き戻しを防止
         await new Promise(r => chrome.storage.local.remove(storageKeys, r));
         const db = await _openDB();
         await new Promise((r, j) => {

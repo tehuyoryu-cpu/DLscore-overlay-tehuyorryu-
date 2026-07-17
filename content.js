@@ -748,25 +748,30 @@
 
   // 1アンカーぶんの軽量チェック。extractRJCardMap の単一DOM走査に相乗りさせ、
   // タブが多い状態でも querySelectorAll を二重実行しない（重量化対策）。
+  // 戻り値: 内部で findCard(a) を計算した場合はその結果(要素 or null)を返し、
+  // 呼び出し元(extractRJCardMap)がカード要素を再度 closest() で探し直さずに
+  // 使い回せるようにする（未計算の場合は undefined を返す）。
   function applyAffiliateOne(a) {
-    if (settings.enableAffiliate === false) return;
-    if (a.dataset.dlscoreAff) return;
-    if (a.hostname === AFFILIATE_HOST) { a.dataset.dlscoreAff = "1"; return; } // 除外設定
-    if (SKIP_HREF_PATTERN.test(a.href)) return;
-    if (EXCLUDE_PATH_RE.test(a.href)) { a.dataset.dlscoreAff = "1"; return; } // 除外設定
+    if (settings.enableAffiliate === false) return undefined;
+    if (a.dataset.dlscoreAff) return undefined;
+    if (a.hostname === AFFILIATE_HOST) { a.dataset.dlscoreAff = "1"; return undefined; } // 除外設定
+    if (SKIP_HREF_PATTERN.test(a.href)) return undefined;
+    if (EXCLUDE_PATH_RE.test(a.href)) { a.dataset.dlscoreAff = "1"; return undefined; } // 除外設定
     const m = a.href.match(PRODUCT_LINK_RE);
-    if (!m) return;
+    if (!m) return undefined;
+    const card = findCard(a); // ここで1回だけ closest() を実行し、下でも呼び出し元でも使い回す
     // 未発売作品判定: 発売日到達で表示が変わりうるため dataset マークせず毎走査で再判定
-    if (PRERELEASE_RE.test(findCard(a)?.textContent || "")) return;
+    if (PRERELEASE_RE.test(card?.textContent || "")) return card;
     a.dataset.dlscoreAff = "1";
     a.href = affiliateUrl(m[1].toUpperCase());
     a.rel  = a.rel && a.rel.includes("sponsored") ? a.rel : `${a.rel || ""} noopener sponsored`.trim();
+    return card;
   }
 
   function extractRJCardMap() {
     const rjCards = new Map();
     document.querySelectorAll("a[href]").forEach(a => {
-      applyAffiliateOne(a); // 同一走査でアフィリエイト置換も済ませる
+      const affCard = applyAffiliateOne(a); // 同一走査でアフィリエイト置換も済ませ、findCard結果を再利用
       const m = a.href.match(/[/=](RJ\d{4,})/i);
       if (!m) return;
       const rj = m[1].toUpperCase();
@@ -774,7 +779,9 @@
       if (SKIP_HREF_PATTERN.test(a.href)) return;
       if (a.className && SKIP_CLASS_PATTERN.test(a.className)) return;
       if (a.children.length === 1 && a.children[0].tagName === "IMG") return;
-      const card = findCard(a);
+      // findCard(a)は要素だけで決まる純粋な結果のため、applyAffiliateOne側で
+      // 既に計算済みならそれを再利用し、重複したclosest()呼び出しを避ける。
+      const card = affCard !== undefined ? affCard : findCard(a);
       if (!card) return;
       if (isDetail && !withinList(card)) return;
       if (!rjCards.has(rj)) rjCards.set(rj, new Set());

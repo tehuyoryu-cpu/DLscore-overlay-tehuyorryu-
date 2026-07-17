@@ -15,6 +15,8 @@
 【解決済み】
 
 ■ UI / 表示関係
+- アフィリエイトリンク: 未発売（予約受付中）作品には上付けしない → カード内テキストに「予約」を含む場合は対象外（発売日到達で再判定されるようdatasetマークしない）
+- アフィリエイトリンク: 公式アフィリエイトリンク発行ページ(/user/affiliate/link/work/)・ウィッシュリスト追加リンク(/mypage/wishlist/)を除外設定 → 末尾がRJxxxxx.htmlのため誤マッチしていたのをEXCLUDE_PATH_REで先に除外
 - アフィリエイトリンク自動置換 → 作品詳細ページ(RJxxxx.html)への外部リンクを dlaf.jp アフィリエイトリダイレクタへ書き換え。カート/体験版等は SKIP_HREF_PATTERN で除外し購入導線を保護。popupの「🔗 アフィリエイトリンク」トグルでON/OFF可能（デフォルトON）
 - Firefox、閾値の数値を変更するボタンが白くて浮く → -moz-appearance:textfield で統一
 - renderMain の \n が改行されない → alertSpan を別要素で管理

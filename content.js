@@ -731,9 +731,16 @@
   // 作品詳細ページへの外部リンクを DLsite アフィリエイトリダイレクタへ書き換える。
   // カート/体験版/購入リンクは対象外（SKIP_HREF_PATTERN で除外、機能破壊防止）。
   // dlaf.jp（アフィリエイトリダイレクタ自体）へのリンクは除外設定（二重変換・無限リダイレクト防止）。
+  // 公式アフィリエイトリンク発行ページ／ウィッシュリスト追加リンクも除外設定
+  // （機能破壊防止。どちらも末尾が /RJxxxxx.html のため PRODUCT_LINK_RE に
+  //   誤マッチしてしまうので、先にパスで弾く）。
   const AFFILIATE_AID    = "SWSW457457";
   const AFFILIATE_HOST   = "dlaf.jp";
   const PRODUCT_LINK_RE  = /\/(?:work\/=\/product_id\/)?(RJ\d{4,})\.html(?:[?#]|$)/i;
+  const EXCLUDE_PATH_RE  = /\/(?:user\/affiliate\/link\/work|mypage\/wishlist)\//i;
+  // 未発売（予約受付中）作品は成果対象外のため置換しない。
+  // カードのテキスト中に「予約」を含むかで判定（タグ辞書333件に該当語なし＝誤検知しにくい）。
+  const PRERELEASE_RE    = /予約/;
 
   function affiliateUrl(rj) {
     return `https://${AFFILIATE_HOST}/home/dlaf/=/t/n/link/work/aid/${AFFILIATE_AID}/id/${rj}.html`;
@@ -746,8 +753,11 @@
     if (a.dataset.dlscoreAff) return;
     if (a.hostname === AFFILIATE_HOST) { a.dataset.dlscoreAff = "1"; return; } // 除外設定
     if (SKIP_HREF_PATTERN.test(a.href)) return;
+    if (EXCLUDE_PATH_RE.test(a.href)) { a.dataset.dlscoreAff = "1"; return; } // 除外設定
     const m = a.href.match(PRODUCT_LINK_RE);
     if (!m) return;
+    // 未発売作品判定: 発売日到達で表示が変わりうるため dataset マークせず毎走査で再判定
+    if (PRERELEASE_RE.test(findCard(a)?.textContent || "")) return;
     a.dataset.dlscoreAff = "1";
     a.href = affiliateUrl(m[1].toUpperCase());
     a.rel  = a.rel && a.rel.includes("sponsored") ? a.rel : `${a.rel || ""} noopener sponsored`.trim();

@@ -24,7 +24,6 @@
   const RESULT_MAX      = 500;
   const PRUNE_INTERVAL  = 1000 * 60 * 5;
   const COMP_KEYS       = ["compPosition", "compDiscount", "compRarity", "compTrend"];
-  const COMPILATION_KEY = "dlsite_compilations_v1";
 
   const DEFAULTS = {
     showOverlay:     true,
@@ -568,7 +567,7 @@
       card.querySelector(".work_name")?.parentElement ||
       card;
     target.appendChild(div);
-    if (compilationSet.has(rj.toUpperCase())) {
+    if (rawDataCache.get(rj)?.comp) {
       const badge = document.createElement("span");
       badge.dataset.dlscoreComp = "1";
       badge.style.cssText = "display:block;font-size:10px;color:#4a9eff;margin-top:2px;";
@@ -613,11 +612,8 @@
     // STATS_KEY のみの変更でも統計オーバーレイを更新
     if (STATS_KEY in changes) renderStatsOverlay();
     if (Object.keys(changes).every(k => k === STATS_KEY)) return;
-    if (COMPILATION_KEY in changes) {
-      loadCompilations(() => updateCompilationBadges());
-    }
     for (const [key, { newValue }] of Object.entries(changes)) {
-      if (key === STATS_KEY || key === COMPILATION_KEY) continue;
+      if (key === STATS_KEY) continue;
       settings[key] = newValue !== undefined ? newValue : DEFAULTS[key];
     }
     const compChanged = Object.keys(changes).some(k => COMP_KEYS.includes(k));
@@ -963,46 +959,15 @@
   // カウントバグ修正: pagehide でページ離脱前に確実にflush
   window.addEventListener("pagehide", () => { if (statsDirty) flushStats(); });
 
-  let compilationSet = new Set();
-
-  function loadCompilations(cb) {
-    chrome.storage.local.get({ [COMPILATION_KEY]: [] }, (res) => {
-      compilationSet = new Set((res[COMPILATION_KEY] || []).map(r => r.toUpperCase()));
-      if (cb) cb();
-    });
-  }
-
-  function saveCompilations() {
-    chrome.storage.local.set({ [COMPILATION_KEY]: [...compilationSet] });
-  }
-
-  loadCompilations();
-
-  function updateCompilationBadges() {
-    for (const [rj, divSet] of renderedCards.entries()) {
-      const inComp = compilationSet.has(rj.toUpperCase());
-      for (const div of divSet) {
-        if (!div.isConnected) continue;
-        let badge = div.parentElement?.querySelector("[data-dlscore-comp]");
-        if (inComp && !badge) {
-          badge = document.createElement("span");
-          badge.dataset.dlscoreComp = "1";
-          badge.style.cssText = "display:block;font-size:10px;color:#4a9eff;margin-top:2px;";
-          badge.textContent = "📦 総集編あり";
-          div.insertAdjacentElement("afterend", badge);
-        } else if (!inComp && badge) {
-          badge.remove();
-        }
-      }
-    }
-    if (mainRJ) updateMainCompBadge();
-  }
-
+  // 総集編バッジ判定は fetch 結果(rawDataCache の comp フィールド、shard由来)に一本化。
+  // 以前はローカルの chrome.storage.local(dlsite_compilations_v1) を別途参照していたが、
+  // 総集編判定はNode側(compScan.js)がGitHub共有DBへ配信するようになったため、
+  // スコア取得と同じデータソース(rawDataCache)を見るだけで済むようになった。
   function updateMainCompBadge() {
     const el = document.querySelector("#dlscore-main");
     if (!el) return;
     let badge    = el.querySelector("[data-dlscore-comp]");
-    const inComp = mainRJ && compilationSet.has(mainRJ.toUpperCase());
+    const inComp = mainRJ && !!rawDataCache.get(mainRJ)?.comp;
     if (inComp && !badge) {
       badge = document.createElement("span");
       badge.dataset.dlscoreComp = "1";

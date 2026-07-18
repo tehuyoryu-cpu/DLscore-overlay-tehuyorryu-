@@ -21,8 +21,8 @@ const HELP_ITEMS = [
     a: "<strong>価格ポジション50% · 割引率25% · 希少性15% · トレンド10%</strong> の重み付き合計（0〜100点）。各要素はポップアップの「⚖️ スコア計算要素」でON/OFF可能。",
   },
   {
-    q: "📦 総集編マークの使い方",
-    a: "「📦 総集編マーク一覧」→「🔄 取得」を押すと <code>dldshare.net</code> を自動巡回してRJを収集。完了後、一覧・詳細ページにバッジが表示されます。",
+    q: "📦 総集編バッジとは",
+    a: "共有DB(GitHub)側で収録判定済みの作品に自動で表示されます。拡張側での操作は不要です。"
   },
   {
     q: "走査が止まる / 遅い",
@@ -46,7 +46,7 @@ const HELP_ITEMS = [
   },
   {
     q: "データはどこに保存される？",
-    a: "設定・統計・総集編リストは <code>chrome.storage.local</code>。価格履歴は <code>localStorage</code>（上限300件）、スコアキャッシュは <code>IndexedDB</code>。外部送信はありません（共有スコアDB(GitHub raw)へのアクセスを除く）。",
+    a: "設定・統計は <code>chrome.storage.local</code>。価格履歴は <code>localStorage</code>（上限300件）、スコア・総集編バッジのキャッシュは <code>IndexedDB</code>。外部送信はありません（共有DB(GitHub raw)へのアクセスを除く）。",
   },
 ];
 
@@ -99,11 +99,6 @@ function createVirtualList(pageSize = 50) {
     reset()          { count = pageSize; },
   };
 }
-const compVL = createVirtualList(50);
-// M項: 検索欄の入力効率化用キャッシュ（loadCompilationList/renderCompilationListで使用）。
-// null=未取得、[]=空も含めキャッシュ済み。COMPILATION_KEY変化時にnullへリセットされる。
-let _compListCache = null;
-
 const DEFAULTS = {
   showOverlay:     true,
   showCards:       true,
@@ -125,9 +120,7 @@ const DEFAULTS = {
   enableAffiliate: true,
 };
 
-const STATS_KEY       = "dlsite_stats_v1";
-const COMPILATION_KEY = "dlsite_compilations_v1";
-const PENDING_KEY     = "dlsite_comp_pending_v1";
+const STATS_KEY = "dlsite_stats_v1";
 
 const BASE_WEIGHTS = {
   compPosition: 50,
@@ -178,336 +171,8 @@ function loadStats() {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes[STATS_KEY])       loadStats();
-  if (area === "local" && changes[COMPILATION_KEY]) { _compListCache = null; loadCompilationList(); }
-  if (area === "local" && changes[PENDING_KEY])     loadPendingList();
+  if (area === "local" && changes[STATS_KEY]) loadStats();
 });
-
-function initCompFetchBtn() {
-  const btn     = document.getElementById("fetchCompBtn");
-  const stopBt  = document.getElementById("stopCompBtn");
-  const freshBt = document.getElementById("freshCompBtn");
-  const progEl  = document.getElementById("compProgress");
-  const hdrEl   = document.querySelector("[data-target='s-comp-list']");
-  if (!btn || !progEl) return;
-
-  const STATE_KEY = "dlsite_crawl_state";
-
-  function formatProgress(prog) {
-    const parts = [];
-    if (prog.phase)        parts.push(prog.phase);
-    if (prog.page)         parts.push(`${prog.page}p`);
-    if (prog.total > 0)    parts.push(`${prog.fetched}/${prog.total}件`);
-    else if (prog.fetched) parts.push(`${prog.fetched}件`);
-    if (prog.rj)           parts.push(`RJ ${prog.rj}件`);
-    return parts.join("  ·  ");
-  }
-
-  function applyResumeState(state) {
-    if (!state) {
-      btn.textContent = btn.dataset.done ?? "🔄 取得";
-      btn.dataset.mode = "crawl";
-      if (freshBt) freshBt.style.display = "none";
-      return;
-    }
-    const pct = state.phase === 2 && state.articleUrls?.length > 0
-      ? Math.round(((state.processedUrls?.length ?? 0) / state.articleUrls.length) * 100)
-      : null;
-    btn.textContent  = pct != null ? `▶ 再開（${pct}%済）` : "▶ 再開";
-    btn.dataset.mode = "resume";
-    if (freshBt) freshBt.style.display = "";
-  }
-
-  const crawlDot = document.getElementById("crawlDot");
-
-  function setRunningUI(running, text) {
-    progEl.style.display = running ? "" : "none";
-    if (text) progEl.textContent = text;
-    btn.disabled = running;
-    if (!running) {
-      chrome.storage.local.get({ [STATE_KEY]: null }, (r) => applyResumeState(r[STATE_KEY]));
-    } else {
-      btn.textContent = "取得中…";
-    }
-    if (stopBt)   stopBt.style.display   = running ? "" : "none";
-    if (freshBt)  freshBt.style.display  = running ? "none" : freshBt.style.display;
-    if (crawlDot) crawlDot.classList.toggle("active", running);
-    if (running)  openSection("s-comp-list");
-    if (hdrEl)    hdrEl.style.opacity    = running ? "0.6" : "";
-  }
-
-  chrome.storage.local.get({ dlsite_comp_progress: null, [STATE_KEY]: null }, (res) => {
-    if (res.dlsite_comp_progress?.running) {
-      setRunningUI(true, formatProgress(res.dlsite_comp_progress));
-    } else {
-      applyResumeState(res[STATE_KEY]);
-    }
-  });
-
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-
-    if ("dlsite_comp_progress" in changes) {
-      const prog = changes["dlsite_comp_progress"].newValue;
-      if (prog?.running) {
-        setRunningUI(true, formatProgress(prog));
-      } else {
-        setRunningUI(false);
-        loadCompilationList();
-        if (prog?.phase === "完了") {
-          chrome.storage.local.get({ [COMPILATION_KEY]: [] }, (r) => {
-            const count = (r[COMPILATION_KEY] || []).length;
-            btn.dataset.done = `✓ ${count}件`;
-            btn.textContent  = btn.dataset.done;
-            btn.classList.add("done");
-            setTimeout(() => {
-              btn.classList.remove("done");
-              delete btn.dataset.done;
-              applyResumeState(null);
-            }, 3500);
-          });
-        }
-      }
-    }
-
-    if (STATE_KEY in changes && !btn.disabled) {
-      applyResumeState(changes[STATE_KEY].newValue ?? null);
-    }
-  });
-
-  btn.addEventListener("click", () => {
-    const mode = btn.dataset.mode === "resume" ? "resume" : "crawl";
-    delete btn.dataset.done;
-    setRunningUI(true, mode === "resume" ? "再開中…" : "接続中…");
-
-    chrome.runtime.sendMessage({ type: "FETCH_COMPILATION", mode }, (res) => {
-      if (chrome.runtime.lastError || !res?.ok) {
-        const reason = res?.reason === "already_running" ? "すでに実行中" : "失敗";
-        setRunningUI(false);
-        btn.textContent = `⚠️ ${reason}`;
-        setTimeout(() => applyResumeState(null), 2500);
-      }
-    });
-  });
-
-  if (freshBt) {
-    freshBt.style.display = "none";
-    freshBt.addEventListener("click", () => {
-      chrome.storage.local.remove(STATE_KEY, () => {
-        btn.dataset.mode = "crawl";
-        btn.textContent  = "🔄 取得";
-        freshBt.style.display = "none";
-      });
-    });
-  }
-
-  if (stopBt) {
-    stopBt.style.display = "none";
-    stopBt.addEventListener("click", () => {
-      chrome.runtime.sendMessage({ type: "STOP_COMPILATION" });
-      setRunningUI(false);
-      progEl.style.display = "";
-      progEl.textContent   = "停止中…（状態を保存しました）";
-      setTimeout(() => { progEl.style.display = "none"; }, 2000);
-    });
-  }
-}
-
-// M項: 検索欄の入力効率化対策
-// 従来は入力(input)イベントのたびに chrome.storage.local.get で全RJリストを
-// 再取得→フィルタ→再描画しており、収集件数が多いタブでは1打鍵ごとに
-// IPCラウンドトリップ＋大きな配列のJSONデシリアライズが発生していた。
-// リストは COMPILATION_KEY の storage.onChanged 経由でしか変化しないため、
-// メモリキャッシュを持たせて検索時は再取得せずフィルタのみ行う。
-function loadCompilationList() {
-  const container = document.getElementById("compListContainer");
-  if (!container) return;
-
-  const keyword = document.getElementById("compSearch")?.value || "";
-
-  if (_compListCache !== null) {
-    renderCompilationList(container, _compListCache, keyword);
-    return;
-  }
-
-  chrome.storage.local.get({ [COMPILATION_KEY]: [] }, (res) => {
-    if (chrome.runtime.lastError) return;
-    _compListCache = res[COMPILATION_KEY] || [];
-    renderCompilationList(container, _compListCache, keyword);
-  });
-}
-
-function renderCompilationList(container, raw, keyword) {
-  const list = filterRJList(raw, keyword);
-
-  if (list.length === 0) {
-    container.className   = "comp-list-empty";
-    container.textContent = keyword ? "一致する作品がありません" : "マークされた作品はありません";
-    return;
-  }
-
-  container.className = "comp-list";
-
-  const visible = compVL.getVisible(list);
-  // DocumentFragmentにまとめてから1回でappendすることで、レイアウト/スタイル
-  // 再計算(reflow)を件数ぶん発生させず1回に抑える。
-  const frag = document.createDocumentFragment();
-
-  visible.forEach(rj => {
-    const item = document.createElement("div");
-    item.className = "comp-item";
-
-    const rjSpan = document.createElement("span");
-    rjSpan.className   = "comp-item-rj";
-    rjSpan.textContent = rj;
-
-    const delBtn = document.createElement("button");
-    delBtn.className   = "comp-item-del";
-    delBtn.textContent = "✕";
-    delBtn.title       = "リストから削除";
-    delBtn.addEventListener("click", () => {
-      chrome.storage.local.get({ [COMPILATION_KEY]: [] }, (r2) => {
-        const updated = (r2[COMPILATION_KEY] || []).filter(r => r !== rj);
-        chrome.storage.local.set({ [COMPILATION_KEY]: updated }); // loadCompilationListはonChangedで自動発火
-      });
-    });
-
-    item.appendChild(rjSpan);
-    item.appendChild(delBtn);
-    frag.appendChild(item);
-  });
-
-  if (visible.length < list.length) {
-    const remaining = list.length - visible.length;
-    const moreBtn = document.createElement("button");
-    moreBtn.className   = "act-btn";
-    moreBtn.style.cssText = "margin:4px 0 2px;width:100%";
-    moreBtn.textContent = `さらに ${Math.min(50, remaining)} 件表示（残 ${remaining} 件）`;
-    moreBtn.addEventListener("click", () => {
-      compVL.showMore();
-      loadCompilationList();
-    });
-    frag.appendChild(moreBtn);
-  }
-
-  container.replaceChildren(frag);
-}
-
-// ── 要確認候補（低信頼度推定・セミオート確認）────────────────────────────────
-const pendingVL = createVirtualList(30);
-
-function loadPendingList() {
-  const container = document.getElementById("pendingListContainer");
-  const badge     = document.getElementById("pendingBadge");
-  if (!container) return;
-
-  chrome.storage.local.get({ [PENDING_KEY]: [] }, (res) => {
-    if (chrome.runtime.lastError) return;
-    const list = res[PENDING_KEY] || [];
-
-    if (badge) {
-      if (list.length > 0) { badge.style.display = ""; badge.textContent = list.length; }
-      else                 { badge.style.display = "none"; }
-    }
-
-    container.innerHTML = "";
-
-    if (list.length === 0) {
-      container.className   = "pending-list-empty";
-      container.textContent = "要確認の候補はありません";
-      return;
-    }
-
-    container.className = "pending-list";
-
-    const visible = pendingVL.getVisible(list);
-
-    visible.forEach(entry => {
-      const item = document.createElement("div");
-      item.className = "pending-item";
-
-      const top = document.createElement("div");
-      top.className = "pending-item-top";
-
-      const rjLink = document.createElement("span");
-      rjLink.className = "pending-item-rj";
-      const a = document.createElement("a");
-      a.href = `https://www.dlsite.com/maniax/work/=/product_id/${entry.rj}.html`;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.textContent = `${entry.rj} ↗`;
-      a.title = "作品ページを開いて確認";
-      rjLink.appendChild(a);
-
-      const scoreEl = document.createElement("span");
-      scoreEl.className = "pending-item-score";
-      scoreEl.textContent = `${entry.score}点`;
-
-      top.appendChild(rjLink);
-      top.appendChild(scoreEl);
-
-      const compEl = document.createElement("div");
-      compEl.className = "pending-item-comp";
-      compEl.textContent = `総集編候補: ${entry.compRj}`;
-
-      const reasonsEl = document.createElement("div");
-      reasonsEl.className = "pending-item-reasons";
-      (entry.reasons || []).forEach(r => {
-        const tag = document.createElement("span");
-        tag.className = "pending-reason-tag";
-        tag.textContent = r;
-        reasonsEl.appendChild(tag);
-      });
-
-      const actions = document.createElement("div");
-      actions.className = "pending-item-actions";
-
-      const approveBtn = document.createElement("button");
-      approveBtn.className = "pending-act approve";
-      approveBtn.textContent = "✓ 確定";
-      approveBtn.addEventListener("click", () => {
-        approveBtn.disabled = true;
-        chrome.runtime.sendMessage(
-          { type: "APPROVE_PENDING", rj: entry.rj, compRj: entry.compRj },
-          () => { void chrome.runtime.lastError; loadPendingList(); }
-        );
-      });
-
-      const rejectBtn = document.createElement("button");
-      rejectBtn.className = "pending-act reject";
-      rejectBtn.textContent = "✕ 却下";
-      rejectBtn.addEventListener("click", () => {
-        rejectBtn.disabled = true;
-        chrome.runtime.sendMessage(
-          { type: "REJECT_PENDING", rj: entry.rj, compRj: entry.compRj },
-          () => { void chrome.runtime.lastError; loadPendingList(); }
-        );
-      });
-
-      actions.appendChild(approveBtn);
-      actions.appendChild(rejectBtn);
-
-      item.appendChild(top);
-      item.appendChild(compEl);
-      item.appendChild(reasonsEl);
-      item.appendChild(actions);
-      container.appendChild(item);
-    });
-
-    if (visible.length < list.length) {
-      const remaining = list.length - visible.length;
-      const moreBtn = document.createElement("button");
-      moreBtn.className   = "act-btn";
-      moreBtn.style.cssText = "margin:4px 0 2px;width:100%";
-      moreBtn.textContent = `さらに ${Math.min(30, remaining)} 件表示（残 ${remaining} 件）`;
-      moreBtn.addEventListener("click", () => {
-        pendingVL.showMore();
-        loadPendingList();
-      });
-      container.appendChild(moreBtn);
-    }
-  });
-}
 
 function initPopup() {
   try {
@@ -556,24 +221,18 @@ function initPopup() {
       });
     }
 
-    // 総集編データ全初期化（バグ修正: 未実装だったハンドラ）
+    // 全キャッシュ削除（スコア・総集編バッジ・共有DBインデックスのローカルキャッシュ）
     const clearAllBtn = document.getElementById("clearAllData");
     if (clearAllBtn) {
       clearAllBtn.addEventListener("click", function () {
-        if (!confirm("収集済みRJ・走査状態・スコアDB・要確認候補をすべて削除します。よろしいですか？")) return;
+        if (!confirm("ローカルキャッシュ(スコア・総集編バッジ・共有DBインデックス)をすべて削除します。よろしいですか？")) return;
         const btn = this;
         btn.disabled = true;
         chrome.runtime.sendMessage({ type: "CLEAR_ALL_DATA" }, (res) => {
-          if (chrome.runtime.lastError || !res?.ok) {
-            btn.textContent = "⚠️ 失敗";
-          } else {
-            btn.textContent = "✓ 完了";
-            btn.classList.add("done");
-            loadCompilationList();
-            loadPendingList();
-          }
+          btn.textContent = (chrome.runtime.lastError || !res?.ok) ? "⚠️ 失敗" : "✓ 完了";
+          if (!chrome.runtime.lastError && res?.ok) btn.classList.add("done");
           setTimeout(() => {
-            btn.textContent = "📦 初期化";
+            btn.textContent = "🗑️ 削除";
             btn.classList.remove("done");
             btn.disabled = false;
           }, 2000);
@@ -597,18 +256,6 @@ function initPopup() {
       });
     }
 
-    // RJ検索（デバウンス: 連続入力のたびにフィルタ+再描画が走らないよう120ms待つ）
-    const searchEl = document.getElementById("compSearch");
-    if (searchEl) {
-      let searchDebounce = null;
-      searchEl.addEventListener("input", () => {
-        clearTimeout(searchDebounce);
-        searchDebounce = setTimeout(() => {
-          compVL.reset();
-          loadCompilationList();
-        }, 120);
-      });
-    }
   } catch (e) {
     console.error("[DLscore popup] init error:", e);
   }
@@ -705,9 +352,6 @@ function initPopup() {
       });
 
       loadStats();
-      loadCompilationList();
-      loadPendingList();
-      initCompFetchBtn();
 
     } catch (e) {
       console.error("[DLscore popup] init error:", e);

@@ -1,6 +1,6 @@
 // background.js
-// クローラーロジックは crawler_tab.js（専用タブ）に移管済み。
-// ここではタブの開閉管理・AI レビュー・FETCH メッセージのみを担う。
+// 総集編巡回・スコア収集は Node側デスクトップアプリ(compScan.js/exportShards.js)に一本化済み。
+// ここでは AI レビュー・FETCH メッセージのみを担う。
 //
 // ★スコアデータは拡張側では取得しない方針。
 //   共有DBは tehuyoryu-cpu/siteruns23432 の data ブランチ（別プロジェクト。PC側の
@@ -17,9 +17,6 @@ setInterval(() => {
 }, 20_000);
 
 // ── 定数 ──
-const _PROG_KEY        = "dlsite_comp_progress";
-const _COMP_KEY        = "dlsite_compilations_v1";
-const _COMP_PENDING_KEY = "dlsite_comp_pending_v1";
 const FETCH_TIMEOUT_MS = 15_000;
 
 // ── スコアキャッシュTTL（popup の「スコア更新頻度」設定から取得。未設定時は6時間）──
@@ -84,18 +81,8 @@ function _fnv1a(str) {
   return h >>> 0;
 }
 
-// ── SW 再起動時の状態整合 ──
-// 旧実装は SW 再起動のたびに「走査中」フラグを無条件でクリアしていたが、
-// MV3 の Service Worker は実行中のタブがあっても数十秒のアイドルで頻繁に
-// 再起動されるため、実際にはクローラータブがまだ動いているのに popup 側が
-// 「停止中」と誤表示し、ユーザーが再度「取得」を押して二重にタブを開いて
-// しまう（＝タブが増殖して重くなる）原因になっていた。
-// → 実際に crawler_tab.html のタブが存在するかを確認してから整合させる。
-// （_reconcileCrawlerTabs は _crawlerTabId 宣言後に呼び出す）
-
-// ── IndexedDB（crawler_tab.js と同じ DB。ローカルキャッシュ + GitHub shard キャッシュ）──
+// ── IndexedDB（ローカルスコアキャッシュ + GitHub shard キャッシュ）──
 // v3: ghShards ストアを追加（GitHub raw の shard-N.json をキャッシュする用途）。
-// crawler_tab.js 側は v2 のまま open しても問題ない（既存より低いバージョンは無視される）。
 let _idb = null;
 
 function _openDB() {
@@ -342,6 +329,7 @@ function _adaptShardEntry(e) {
     lowestPrice:              { priceInfo: { price: lowest } },
     discountDaysOfLastYear:   dd,
     recentSalePriceLog:       lg,
+    comp:                     e.c === 1,
   };
 }
 
@@ -394,85 +382,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   } catch {}
 });
 
-// ── クローラータブ管理（総集編マーク機能。スコア取得とは無関係）──
-let _crawlerTabId = null;
-
-async function _reconcileCrawlerTabs() {
-  try {
-    const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL("crawler_tab.html") });
-    if (tabs.length === 0) {
-      _crawlerTabId = null;
-      const res = await chrome.storage.local.get({ [_PROG_KEY]: null });
-      if (res[_PROG_KEY]?.running) {
-        await chrome.storage.local.set({ [_PROG_KEY]: { running: false, phase: "停止（再開可能）" } });
-      }
-      return;
-    }
-    // 過去のSW再起動バグ等で複数タブが増殖していた場合は最初の1つだけを残し、
-    // 残りは閉じてブラウザの負荷を軽減する。
-    _crawlerTabId = tabs[0].id;
-    if (tabs.length > 1) {
-      try { await chrome.tabs.remove(tabs.slice(1).map(t => t.id)); } catch {}
-    }
-  } catch { /* ignore */ }
-}
-
-_reconcileCrawlerTabs();
-
-chrome.tabs.onRemoved.addListener((tabId) => {
-  if (tabId !== _crawlerTabId) return;
-  _crawlerTabId = null;
-  chrome.storage.local.get({ [_PROG_KEY]: null }, (res) => {
-    if (res[_PROG_KEY]?.running) {
-      chrome.storage.local.set({ [_PROG_KEY]: { running: false, phase: "停止（タブを閉じました）" } });
-    }
-  });
-});
-
 // ── メッセージハンドラ ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-
-  // ── 総集編クローラー: タブを開いて実行 ──
-  if (msg.type === "FETCH_COMPILATION") {
-    (async () => {
-      // _crawlerTabId は SW 再起動で失われている可能性があるため、都度実タブで確認する
-      await _reconcileCrawlerTabs();
-      if (_crawlerTabId !== null) {
-        sendResponse({ ok: false, reason: "already_running" });
-        return;
-      }
-      const mode = msg.mode === "resume" ? "resume" : "crawl";
-      await chrome.storage.local.set({ dlsite_crawler_mode: mode });
-      chrome.tabs.create(
-        { url: chrome.runtime.getURL("crawler_tab.html"), active: false },
-        (tab) => {
-          if (chrome.runtime.lastError) {
-            chrome.storage.local.remove("dlsite_crawler_mode");
-            sendResponse({ ok: false, reason: "tab_open_failed" });
-            return;
-          }
-          _crawlerTabId = tab.id;
-          sendResponse({ ok: true, started: true });
-        }
-      );
-    })();
-    return true;
-  }
-
-  // ── 総集編クローラー: 停止 ──
-  if (msg.type === "STOP_COMPILATION") {
-    if (_crawlerTabId !== null) {
-      chrome.tabs.sendMessage(_crawlerTabId, { type: "STOP_CRAWLER_TAB" }, () => {
-        void chrome.runtime.lastError;
-      });
-    }
-    sendResponse({ ok: true });
-  }
-
-  // ── crawler_tab.js からの完了通知 ──
-  if (msg.type === "CRAWLER_DONE") {
-    _crawlerTabId = null;
-  }
 
   // ── スコアDBのみリセット（IndexedDB scores を全削除） ──
   if (msg.type === "CLEAR_SCORE_DB") {
@@ -497,12 +408,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // ── 総集編データ全初期化 ──
   if (msg.type === "CLEAR_ALL_DATA") {
     const storageKeys = [
-      "dlsite_compilations_v1",
-      "dlsite_comp_works_v1",
-      "dlsite_processed_comps_v1",
-      "dlsite_crawl_state",
-      "dlsite_comp_progress",
-      "dlsite_comp_pending_v1",
       "_ghManifestCache",
       "_ghIndexCache",
     ];
@@ -520,34 +425,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         _idb = null;
         sendResponse({ ok: true });
-      } catch (e) { sendResponse({ ok: false, err: String(e) }); }
-    })();
-    return true;
-  }
-
-  // ── 要確認候補（低信頼度推定）の承認: pendingから消してcompilationsに確定登録 ──
-  if (msg.type === "APPROVE_PENDING") {
-    (async () => {
-      try {
-        const r = await chrome.storage.local.get({ [_COMP_PENDING_KEY]: [], [_COMP_KEY]: [] });
-        const pending = r[_COMP_PENDING_KEY].filter(e => !(e.rj === msg.rj && e.compRj === msg.compRj));
-        const confirmed = [...new Set([...r[_COMP_KEY], msg.rj])].sort();
-        await new Promise(res => chrome.storage.local.set(
-          { [_COMP_PENDING_KEY]: pending, [_COMP_KEY]: confirmed }, res));
-        sendResponse({ ok: true, pendingCount: pending.length });
-      } catch (e) { sendResponse({ ok: false, err: String(e) }); }
-    })();
-    return true;
-  }
-
-  // ── 要確認候補の却下: pendingから消すだけ（confirmed化しない） ──
-  if (msg.type === "REJECT_PENDING") {
-    (async () => {
-      try {
-        const r = await chrome.storage.local.get({ [_COMP_PENDING_KEY]: [] });
-        const pending = r[_COMP_PENDING_KEY].filter(e => !(e.rj === msg.rj && e.compRj === msg.compRj));
-        await new Promise(res => chrome.storage.local.set({ [_COMP_PENDING_KEY]: pending }, res));
-        sendResponse({ ok: true, pendingCount: pending.length });
       } catch (e) { sendResponse({ ok: false, err: String(e) }); }
     })();
     return true;

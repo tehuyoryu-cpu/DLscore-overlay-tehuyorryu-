@@ -6,7 +6,7 @@
 //   共有DBは tehuyoryu-cpu/siteruns23432 の data ブランチ（別プロジェクト。PC側の
 //   デスクトップアプリが自前でDLsiteを巡回して収集した価格データから
 //   crawler/exportShards.js が manifest.json / index/NN.json / shards/NNNN.json を
-//   生成し、1日1回 push する）。
+//   生成し、6時間おき に push する）。
 //   拡張はそれを raw.githubusercontent.com 経由で manifest→index→shard の順に「拾うだけ」
 //   （dlwatcher.com への直接アクセスは廃止）。
 //   ローカルキャッシュ(IndexedDB)の有効期限は popup で 6時間/1日/1週間/1か月 から選択可能。
@@ -15,6 +15,27 @@
 setInterval(() => {
   chrome.storage.local.get(null, () => { void chrome.runtime.lastError; });
 }, 20_000);
+
+// ── 旧バージョン(クライアント側総集編クローラー)の残留データ掃除 ──
+// v1.9でcrawler_tab.js/comp_analyzer.jsを削除し、総集編判定は共有DB(shard)経由の
+// comp フィールドに一本化したが、既存ユーザーの chrome.storage.local には
+// 旧バージョンが書き込んだキーがアップデート後もそのまま残り続ける
+// （実害はないが不要データが溜まり続けるため、更新時に一度だけ掃除する）。
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason !== "update") return;
+  const legacyKeys = [
+    "dlsite_compilations_v1",
+    "dlsite_comp_works_v1",
+    "dlsite_processed_comps_v1",
+    "dlsite_crawl_state",
+    "dlsite_comp_progress",
+    "dlsite_comp_pending_v1",
+  ];
+  chrome.storage.local.remove(legacyKeys, () => {
+    if (chrome.runtime.lastError) return;
+    console.log("[DLscore] legacy compilation-crawler data cleaned up:", legacyKeys);
+  });
+});
 
 // ── 定数 ──
 const FETCH_TIMEOUT_MS = 15_000;
